@@ -35,7 +35,7 @@ android {
 ksp { arg("room.schemaLocation", "$projectDir/schemas") }
 
 dependencies {
-    val bom = platform("androidx.compose:compose-bom:2026.09.00")
+    val bom = platform("androidx.compose:compose-bom:2026.02.00")
     implementation(bom)
     androidTestImplementation(bom)
     implementation("androidx.core:core-ktx:1.16.0")
