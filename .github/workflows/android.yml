@@ -34,13 +34,10 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Preparar Android SDK do runner
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "${ANDROID_HOME:-}"
-          command -v sdkmanager
-          sdkmanager --version
+      - name: Configurar Android SDK atualizado
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
 
       - name: Instalar plataforma e ferramentas de build
         shell: bash
