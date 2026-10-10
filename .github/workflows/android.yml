@@ -34,11 +34,20 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Configurar Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Preparar Android SDK do runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${ANDROID_HOME:-}"
+          command -v sdkmanager
+          sdkmanager --version
 
       - name: Instalar plataforma e ferramentas de build
-        run: sdkmanager --install "platforms;android-36" "build-tools;35.0.0"
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install "platforms;android-36" "build-tools;35.0.0"
+          printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
 
       - name: Configurar Gradle 8.13 com cache
         uses: gradle/actions/setup-gradle@v4
