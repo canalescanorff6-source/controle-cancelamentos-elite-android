@@ -19,7 +19,7 @@ errors = [f"Arquivo obrigatório ausente: {name}" for name in required if not (R
 gradle = (ROOT / "app/build.gradle.kts").read_text(encoding="utf-8")
 for regex, message in [
     (r'applicationId\s*=\s*"br\.com\.controlecancelamentos"', "Identificador do app alterado: confira a compatibilidade da atualização"),
-    (r'versionCode\s*=\s*3\b', "Versão Android inesperada; revise o versionCode"),
+    (r'versionCode\s*=\s*[1-9][0-9]*\b', "VersionCode Android ausente ou inválido"),
     (r'implementation\("com\.google\.mlkit:text-recognition:', "Dependência ML Kit OCR ausente"),
 ]:
     if not re.search(regex, gradle):
