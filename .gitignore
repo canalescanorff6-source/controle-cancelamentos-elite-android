@@ -1,0 +1,29 @@
+.gradle/
+.idea/
+**/build/
+local.properties
+*.iml
+*.apk
+*.aab
+*.jks
+*.keystore
+.DS_Store
+captures/
+*.ccel
+*.db
+*.db-wal
+*.db-shm
+cupons/
+cancelamentos*.csv
+cancelamentos*.pdf
+
+# Chaves, anexos e relatórios fiscais (não publicar)
+*.pem
+*.p12
+*.pfx
+.env
+.env.*
+google-services.json
+*.sqlite
+*.sqlite3
+# Arquivos de imagens de projeto em res/ podem ser versionados; fotos reais devem ficar fora do Git.
