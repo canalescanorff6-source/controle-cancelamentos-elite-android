@@ -153,8 +153,8 @@ fun RegisterScreen(vm: AppViewModel, editing: CancellationEntity?, busy: Boolean
                 PremiumPanel {
                     SectionTitle("02 · Informações do cancelamento")
                     Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                        AppTextField(form.date, { form = form.copy(date = it) }, "Data • dd/MM/aaaa", Modifier.weight(1f), keyboardType = KeyboardType.Date)
-                        AppTextField(form.time, { form = form.copy(time = it) }, "Hora • HH:mm", Modifier.weight(0.72f), keyboardType = KeyboardType.Time)
+                        AppTextField(form.date, { form = form.copy(date = it) }, "Data • dd/MM/aaaa", Modifier.weight(1f), keyboardType = KeyboardType.Text)
+                        AppTextField(form.time, { form = form.copy(time = it) }, "Hora • HH:mm", Modifier.weight(0.72f), keyboardType = KeyboardType.Text)
                     }
                     AppTextField(form.amount, { form = form.copy(amount = it) }, "Valor do cupom (R$) *", keyboardType = KeyboardType.Decimal)
                     AppTextField(form.coupon, { form = form.copy(coupon = it) }, "Número do cupom *", keyboardType = KeyboardType.Text)
