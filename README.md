@@ -68,7 +68,7 @@ APK de depuração é para testes. Para distribuição formal é necessário con
 - Requer Android Studio com JDK 17, SDK Android 36 e acesso aos repositórios `google()` e `mavenCentral()`.
 - Use Gradle 8.13 (o workflow instala a versão automaticamente).
 - Abra a pasta do projeto, sincronize Gradle e escolha `app > Run`.
-- Dependências: AGP 8.13.2, Kotlin 2.2.20, Compose BOM 2026.09.00, Room 2.8.4 e Google ML Kit 16.0.1.
+- Dependências: AGP 8.13.2, Kotlin 2.2.20, Compose BOM 2026.02.00, Room 2.8.4 e Google ML Kit 16.0.1.
 - Este arquivo não inclui o arquivo binário do Gradle Wrapper. O Android Studio pode usar o Gradle local; ou execute `gradle wrapper --gradle-version 8.13` após instalar o Gradle para gerar o wrapper padrão.
 
 ## Fluxo inicial
