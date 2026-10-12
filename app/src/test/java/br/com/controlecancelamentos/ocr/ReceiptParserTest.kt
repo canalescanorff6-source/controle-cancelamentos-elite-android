@@ -61,4 +61,39 @@ TROCO 5,00""")
         assertNull(parseMoney("abc"))
         assertNull(parseMoney("10,999"))
     }
+
+    @Test fun leCupomCanceladoComCOOeCCF() {
+        val r = ReceiptParser.parse("""
+            CANTINHO DOCE - LOJA 10
+            10/10/2026 17:45:39 CCF:184240 COO:313511
+            TOTAL R$ 64,34
+            CUPOM CANCELADO
+            LJ:0010 PDV:100
+        """.trimIndent())
+        assertEquals("313511", r.coupon)
+        assertEquals("184240", r.ccf)
+        assertEquals("100", r.pdv)
+        assertEquals(6434L, r.amountCents)
+        assertEquals("10/10/2026", r.date)
+        assertEquals("17:45", r.time)
+    }
+    @Test fun preservaZerosAEsquerdaEmCOOeCCF() {
+        val r = ReceiptParser.parse("""
+            CANTINHO DOCE - LOJA 10
+            10/10/2026 15:50:05 CCF:000713 COO:000773
+            TOTAL R$ 111,99
+            CUPOM CANCELADO
+            LJ:0010 PDV:107
+        """.trimIndent())
+        assertEquals("000773", r.coupon)
+        assertEquals("000713", r.ccf)
+        assertEquals("107", r.pdv)
+        assertEquals(11199L, r.amountCents)
+    }
+    @Test fun naoConfundeCCFComCOO() {
+        val r = ReceiptParser.parse("CUPOM CANCELADO\nCCF:000713\nTOTAL R$ 111,99\nPDV:107")
+        assertNull(r.coupon)
+        assertEquals("000713", r.ccf)
+    }
+
 }
