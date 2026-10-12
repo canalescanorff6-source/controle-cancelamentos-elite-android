@@ -76,8 +76,16 @@ object PortableBackup {
                 photoPath=null, createdBy=actorId, updatedBy=actorId,
                 createdAt=v.getLong("createdAt"), updatedAt=v.getLong("updatedAt"))
         }
+        // Nunca aceitar IDs repetidos dentro do mesmo pacote: operações de restauração
+        // poderiam sobrescrever silenciosamente registros ou lojas já importados.
         val storeIds = stores.map { it.id }.toSet()
-        require(records.all { it.storeId == null || it.storeId in storeIds }) { "Backup contém uma loja desconhecida." }
+        require(storeIds.size == stores.size) { "Backup contém lojas com IDs duplicados." }
+        require(records.map { it.id }.toSet().size == records.size) {
+            "Backup contém cancelamentos com IDs duplicados."
+        }
+        require(records.all { it.storeId == null || it.storeId in storeIds }) {
+            "Backup contém uma loja desconhecida."
+        }
         val b = root.optJSONObject("branding") ?: JSONObject()
         val default = BrandingSettings()
         val title = b.optString("appName", default.appName).take(50)
