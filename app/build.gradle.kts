@@ -13,13 +13,13 @@ android {
         applicationId = "br.com.controlecancelamentos"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "3.2.0"
+        versionCode = 6
+        versionName = "3.2.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes {
         debug {
-            applicationIdSuffix = ".teste"
+            applicationIdSuffix = ".teste.visual"
         }
         release {
             isMinifyEnabled = true

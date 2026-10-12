@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ícone e splash usam a MESMA arte premium usada dentro do app. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/elite_brand"
+    android:inset="18dp" />
