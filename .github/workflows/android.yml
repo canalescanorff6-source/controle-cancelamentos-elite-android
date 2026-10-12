@@ -57,6 +57,31 @@ jobs:
       - name: Compilar APK instalável de depuração
         run: gradle --no-daemon --stacktrace assembleDebug
 
+      - name: Validar release com assinatura temporária de CI (não distribuir)
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --stacktrace assembleRelease
+          unsigned="app/build/outputs/apk/release/app-release-unsigned.apk"
+          test -s "$unsigned"
+          scratch="$(mktemp -d)"
+          trap 'rm -rf "$scratch"' EXIT
+          export CI_EPHEMERAL_PASSWORD="$(openssl rand -hex 24)"
+          keytool -genkeypair -noprompt \
+            -keystore "$scratch/ci-only.p12" -storetype PKCS12 \
+            -alias ci-only -keyalg RSA -keysize 2048 -validity 1 \
+            -dname "CN=CI ephemeral signing check" \
+            -storepass "$CI_EPHEMERAL_PASSWORD" -keypass "$CI_EPHEMERAL_PASSWORD"
+          apksigner="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          "$apksigner" sign \
+            --ks "$scratch/ci-only.p12" --ks-type PKCS12 \
+            --ks-key-alias ci-only \
+            --ks-pass env:CI_EPHEMERAL_PASSWORD \
+            --key-pass env:CI_EPHEMERAL_PASSWORD \
+            --out "$scratch/ci-validation.apk" "$unsigned"
+          "$apksigner" verify --verbose "$scratch/ci-validation.apk"
+          # A chave de CI é destruída ao final: jamais publicar este APK.
+
       - name: Verificar artefato APK
         shell: bash
         run: |
