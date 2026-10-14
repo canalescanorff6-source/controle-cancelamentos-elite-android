@@ -22,7 +22,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.core.content.FileProvider
 import br.com.controlecancelamentos.data.*
+import br.com.controlecancelamentos.ocr.ReceiptParser
 import br.com.controlecancelamentos.ocr.ReceiptReader
+import br.com.controlecancelamentos.smart.TeamSuggestions
 import br.com.controlecancelamentos.ocr.InvalidReceiptImageException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -50,6 +52,19 @@ fun RegisterScreen(vm: AppViewModel, editing: CancellationEntity?, busy: Boolean
         var scanNeedsConfirmation by remember { mutableStateOf(false) }
         var scanReviewed by remember { mutableStateOf(false) }
         val stores by vm.stores.collectAsState()
+        val previousRecords by vm.cancellations.collectAsState()
+        var initialStoreResolved by remember { mutableStateOf(editing != null) }
+        LaunchedEffect(stores) {
+            if (!initialStoreResolved && stores.isNotEmpty()) {
+                initialStoreResolved = true
+                stores.filter { it.active }.singleOrNull()?.let { active ->
+                    if (form.storeId == null) form = form.copy(storeId = active.id)
+                }
+            }
+        }
+        val previousTeam = remember(previousRecords, form.storeId, form.pdv, editing?.id) {
+            TeamSuggestions.suggest(previousRecords.filterNot { it.id == editing?.id }, form.storeId, form.pdv)
+        }
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
         LaunchedEffect(form, photoUri) { onDirtyChange(form != initialForm || photoUri != null) }
@@ -63,15 +78,41 @@ fun RegisterScreen(vm: AppViewModel, editing: CancellationEntity?, busy: Boolean
             scope.launch {
                 try {
                     val candidate = ReceiptReader.recognize(context, uri)
+                    val nameFromReceipt = ReceiptParser.matchStore(
+                        candidate, stores.filter { it.active || it.id == form.storeId }.map { it.name }
+                    )
+                    val matchedStore = stores.singleOrNull { it.name == nameFromReceipt }
+                    val extracted = buildList {
+                        if (candidate.coupon != null) add("cupom")
+                        if (candidate.amountCents != null) add("valor")
+                        if (candidate.date != null) add("data")
+                        if (candidate.time != null) add("hora")
+                        if (candidate.pdv != null) add("PDV")
+                        if (candidate.ccf != null) add("CCF")
+                        if (matchedStore != null) add("loja")
+                        if (candidate.operatorName != null && form.operator.isBlank()) add("operador")
+                        if (candidate.fiscalName != null && form.fiscal.isBlank()) add("fiscal")
+                        if (candidate.managerName != null && form.manager.isBlank()) add("gerente")
+                        if (candidate.lossPreventionName != null && form.lossPrevention.isBlank()) add("Prevenção de Perdas")
+                    }
                     form = form.copy(
                         coupon = candidate.coupon ?: form.coupon,
                         amount = candidate.amountCents?.let { (it / 100).toString() + "," + (it % 100).toString().padStart(2, '0') } ?: form.amount,
                         date = candidate.date ?: form.date,
                         time = candidate.time ?: form.time,
                         pdv = candidate.pdv ?: form.pdv,
-                        ccf = candidate.ccf ?: form.ccf
+                        ccf = candidate.ccf ?: form.ccf,
+                        storeId = matchedStore?.id ?: form.storeId,
+                        operator = form.operator.ifBlank { candidate.operatorName.orEmpty() },
+                        fiscal = form.fiscal.ifBlank { candidate.fiscalName.orEmpty() },
+                        manager = form.manager.ifBlank { candidate.managerName.orEmpty() },
+                        lossPrevention = form.lossPrevention.ifBlank { candidate.lossPreventionName.orEmpty() }
                     )
-                    scanMessage = candidate.notes.joinToString("\n")
+                    scanMessage = buildString {
+                        if (extracted.isNotEmpty()) append("Preenchido pela foto: ${extracted.joinToString(", ")}.\n")
+                        append(candidate.notes.joinToString("\n"))
+                        if (candidate.amountCents == null) append("\nValor não confirmado: confira e preencha manualmente.")
+                    }
                     scanNeedsConfirmation = true
                 } catch (error: Exception) {
                     scanMessage = "Leitura não concluída: ${error.message ?: "imagem incompatível"}. Você pode digitar os dados manualmente."
@@ -171,6 +212,22 @@ fun RegisterScreen(vm: AppViewModel, editing: CancellationEntity?, busy: Boolean
                 }
                 PremiumPanel {
                     SectionTitle("03 · Responsáveis")
+                    if (previousTeam != null) {
+                        Text(
+                            "Equipe anterior da loja${if (previousTeam.samePdv) " e do mesmo PDV" else ""}: " +
+                                "${previousTeam.people.joinToString(", ")} (registro de ${previousTeam.previousDate}). " +
+                                "Confira quem está de turno.",
+                            style = MaterialTheme.typography.bodySmall, color = Grey
+                        )
+                        OutlinedButton(
+                            onClick = { form = TeamSuggestions.applyMissing(form, previousTeam) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.PersonAdd, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Usar equipe anterior")
+                        }
+                    }
                     AppTextField(form.operator, { form = form.copy(operator = it) }, "Operador *")
                     AppTextField(form.fiscal, { form = form.copy(fiscal = it) }, "Fiscal de caixa *")
                     AppTextField(form.manager, { form = form.copy(manager = it) }, "Gerente *")
