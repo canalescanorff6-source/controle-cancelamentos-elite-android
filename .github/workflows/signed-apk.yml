@@ -1,0 +1,133 @@
+name: Android | APK de produção assinado (manual)
+
+# Segurança: execução exclusiva por solicitação explícita; nunca roda em pull_request.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: elite-signed-release
+  cancel-in-progress: false
+
+jobs:
+  signed-apk:
+    name: Verificar, compilar e assinar APK
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Obter código da main
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Verificar repositório e impedir chaves no Git
+        run: |
+          set -euo pipefail
+          python3 tools/check_source.py
+          git diff --check
+
+      - name: Configurar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Configurar Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+
+      - name: Instalar API Android e build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install "platforms;android-36" "build-tools;35.0.0"
+          printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
+
+      - name: Configurar Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Testar e compilar release sem assinatura
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --stacktrace testDebugUnitTest assembleRelease
+          test -s app/build/outputs/apk/release/app-release-unsigned.apk
+
+      - name: Recuperar chave privada do GitHub Actions Secrets
+        shell: bash
+        env:
+          ELITE_SIGNING_KEYSTORE_BASE64: ${{ secrets.ELITE_SIGNING_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "$ELITE_SIGNING_KEYSTORE_BASE64" ]; then
+            echo "::error::Configure ELITE_SIGNING_KEYSTORE_BASE64 em Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          signing_file="$RUNNER_TEMP/elite-signing.p12"
+          umask 077
+          printf '%s' "$ELITE_SIGNING_KEYSTORE_BASE64" | base64 --decode > "$signing_file"
+          test -s "$signing_file"
+          echo "ELITE_SIGNING_KEYSTORE_PATH=$signing_file" >> "$GITHUB_ENV"
+
+      - name: Assinar, conferir certificado e identidade do APK
+        shell: bash
+        env:
+          ELITE_SIGNING_STORE_PASSWORD: ${{ secrets.ELITE_SIGNING_STORE_PASSWORD }}
+          ELITE_SIGNING_KEY_PASSWORD: ${{ secrets.ELITE_SIGNING_KEY_PASSWORD }}
+          ELITE_SIGNING_KEY_ALIAS: ${{ secrets.ELITE_SIGNING_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          if [ -z "$ELITE_SIGNING_STORE_PASSWORD" ] || [ -z "$ELITE_SIGNING_KEY_PASSWORD" ] || [ -z "$ELITE_SIGNING_KEY_ALIAS" ]; then
+            echo "::error::Configure os três secrets de senha e alias da assinatura."
+            exit 1
+          fi
+          tools="$ANDROID_HOME/build-tools/35.0.0"
+          apk_dir="app/build/outputs/apk/release"
+          output="$apk_dir/Controle-Cancelamentos-Elite-assinado.apk"
+          "$tools/apksigner" sign \
+            --ks "$ELITE_SIGNING_KEYSTORE_PATH" \
+            --ks-type PKCS12 \
+            --ks-key-alias "$ELITE_SIGNING_KEY_ALIAS" \
+            --ks-pass env:ELITE_SIGNING_STORE_PASSWORD \
+            --key-pass env:ELITE_SIGNING_KEY_PASSWORD \
+            --out "$output" \
+            "$apk_dir/app-release-unsigned.apk"
+          "$tools/apksigner" verify --verbose --print-certs "$output" | tee "$apk_dir/assinatura-certificado.txt"
+          "$tools/aapt" dump badging "$output" | grep -m 1 "^package: name='br.com.controlecancelamentos' " >/dev/null
+          sha256sum "$output" | tee "$apk_dir/Controle-Cancelamentos-Elite-assinado.apk.sha256"
+          test -s "$output"
+
+      - name: Disponibilizar APK assinado nos artefatos
+        uses: actions/upload-artifact@v4
+        with:
+          name: Controle-Cancelamentos-Elite-APK-assinado
+          path: |
+            app/build/outputs/apk/release/Controle-Cancelamentos-Elite-assinado.apk
+            app/build/outputs/apk/release/Controle-Cancelamentos-Elite-assinado.apk.sha256
+            app/build/outputs/apk/release/assinatura-certificado.txt
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Descartar chave temporária do runner
+        if: always()
+        shell: bash
+        run: |
+          if [ -n "${ELITE_SIGNING_KEYSTORE_PATH:-}" ]; then
+            rm -f "$ELITE_SIGNING_KEYSTORE_PATH"
+          fi
+
+      - name: Arquivar resultados de testes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: relatorios-testes-release
+          path: |
+            app/build/reports/tests/**
+            app/build/test-results/**
+          if-no-files-found: ignore
+          retention-days: 7

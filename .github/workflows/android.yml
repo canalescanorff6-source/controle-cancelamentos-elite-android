@@ -1,4 +1,4 @@
-name: Android | Testes e APK V3
+name: Android | Testes e APK V3.2.1
 
 on:
   push:
@@ -26,6 +26,7 @@ jobs:
       - name: Conferir projeto e impedir arquivos sensíveis
         run: |
           python3 tools/check_source.py
+          python3 tools/check_branding.py
           git diff --check
 
       - name: Configurar Java 17
@@ -57,6 +58,48 @@ jobs:
       - name: Compilar APK instalável de depuração
         run: gradle --no-daemon --stacktrace assembleDebug
 
+      - name: Habilitar aceleração para emulador Android
+        run: |
+          if [ -e /dev/kvm ]; then
+            sudo chmod 666 /dev/kvm
+          fi
+
+      - name: Teste de instalação Android em emulador (API 35)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_4
+          disable-animations: true
+          emulator-boot-timeout: 900
+          script: bash tools/android_smoke_install.sh
+
+      - name: Validar release com assinatura temporária de CI (não distribuir)
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --stacktrace assembleRelease
+          unsigned="app/build/outputs/apk/release/app-release-unsigned.apk"
+          test -s "$unsigned"
+          scratch="$(mktemp -d)"
+          trap 'rm -rf "$scratch"' EXIT
+          export CI_EPHEMERAL_PASSWORD="$(openssl rand -hex 24)"
+          keytool -genkeypair -noprompt \
+            -keystore "$scratch/ci-only.p12" -storetype PKCS12 \
+            -alias ci-only -keyalg RSA -keysize 2048 -validity 1 \
+            -dname "CN=CI ephemeral signing check" \
+            -storepass "$CI_EPHEMERAL_PASSWORD" -keypass "$CI_EPHEMERAL_PASSWORD"
+          apksigner="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          "$apksigner" sign \
+            --ks "$scratch/ci-only.p12" --ks-type PKCS12 \
+            --ks-key-alias ci-only \
+            --ks-pass env:CI_EPHEMERAL_PASSWORD \
+            --key-pass env:CI_EPHEMERAL_PASSWORD \
+            --out "$scratch/ci-validation.apk" "$unsigned"
+          "$apksigner" verify --verbose "$scratch/ci-validation.apk"
+          # A chave de CI é destruída ao final: jamais publicar este APK.
+
       - name: Verificar artefato APK
         shell: bash
         run: |
@@ -69,7 +112,7 @@ jobs:
       - name: Publicar APK somente após build aprovado
         uses: actions/upload-artifact@v4
         with:
-          name: Controle-Cancelamentos-Elite-V3-debug
+          name: Controle-Cancelamentos-Elite-V3.2.1-Visual-debug
           path: |
             app/build/outputs/apk/debug/app-debug.apk
             app-debug.apk.sha256

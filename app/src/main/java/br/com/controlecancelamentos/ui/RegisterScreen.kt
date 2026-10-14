@@ -1,9 +1,11 @@
 package br.com.controlecancelamentos.ui
 
 import android.net.Uri
+import android.content.Intent
 import android.graphics.BitmapFactory
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -13,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
@@ -23,6 +26,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.core.content.FileProvider
 import br.com.controlecancelamentos.data.*
 import br.com.controlecancelamentos.ocr.ReceiptReader
+import br.com.controlecancelamentos.ocr.ReceiptCaptureContract
 import br.com.controlecancelamentos.ocr.InvalidReceiptImageException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -37,20 +41,24 @@ fun RegisterScreen(vm: AppViewModel, editing: CancellationEntity?, busy: Boolean
         val initialForm = remember(editing?.id) { editing?.toForm() ?: CancellationForm() }
         var form by remember { mutableStateOf(initialForm) }
         var photoUri by remember { mutableStateOf<Uri?>(null) }
-        var pendingCamera by remember { mutableStateOf<Uri?>(null) }
-        // Keep the mutable state object in the disposal callback, not its initial null value.
-        // Otherwise temporary camera photos can remain in cache when a form is closed.
-        val cameraFileState = remember { mutableStateOf<File?>(null) }
-        var pendingCameraFile by cameraFileState
-        DisposableEffect(Unit) {
-            onDispose { cameraFileState.value?.delete() }
-        }
+        var cameraUriText by rememberSaveable { mutableStateOf<String?>(null) }
+        val pendingCamera = cameraUriText?.let(Uri::parse)
+        var cameraFilePath by rememberSaveable { mutableStateOf<String?>(null) }
+        val cameraFileState = remember { mutableStateOf(cameraFilePath?.let(::File)) }
+        // A limpeza não acontece no onDispose, pois a Activity pode recriar enquanto a câmera estiver aberta.
         var scanning by remember { mutableStateOf(false) }
         var scanMessage by remember { mutableStateOf<String?>(null) }
         var scanNeedsConfirmation by remember { mutableStateOf(false) }
         var scanReviewed by remember { mutableStateOf(false) }
         val stores by vm.stores.collectAsState()
         val context = LocalContext.current
+        LaunchedEffect(Unit) {
+            withContext(Dispatchers.IO) {
+                File(context.cacheDir, "capturas").listFiles()?.forEach { file ->
+                    if (System.currentTimeMillis() - file.lastModified() > 172800000L) file.delete()
+                }
+            }
+        }
         val scope = rememberCoroutineScope()
         LaunchedEffect(form, photoUri) { onDirtyChange(form != initialForm || photoUri != null) }
 
@@ -80,9 +88,10 @@ fun RegisterScreen(vm: AppViewModel, editing: CancellationEntity?, busy: Boolean
                         photoUri = null
                         scanNeedsConfirmation = false
                         if (pendingCamera == uri) {
-                            pendingCameraFile?.delete()
-                            pendingCameraFile = null
-                            pendingCamera = null
+                            cameraFileState.value?.delete()
+                            cameraFileState.value = null
+                            cameraFilePath = null
+                            cameraUriText = null
                         }
                     } else {
                         // Falha de OCR não impede a foto válida e o cadastro manual.
@@ -92,16 +101,66 @@ fun RegisterScreen(vm: AppViewModel, editing: CancellationEntity?, busy: Boolean
             }
         }
 
-        val gallery = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-            uri?.let { processPhoto(it) }
-        }
-        val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
-            if (success) pendingCamera?.let { processPhoto(it) }
-            else {
-                pendingCameraFile?.delete()
-                pendingCameraFile = null
-                pendingCamera = null
+        val gallery = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+            uri?.let {
+                cameraFileState.value?.delete()
+                cameraFileState.value = null
+                cameraFilePath = null
+                cameraUriText = null
+                processPhoto(it)
             }
+        }
+        val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            uri?.let {
+                runCatching {
+                    context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                cameraFileState.value?.delete()
+                cameraFileState.value = null
+                cameraFilePath = null
+                cameraUriText = null
+                processPhoto(it)
+            }
+        }
+        val camera = rememberLauncherForActivityResult(ReceiptCaptureContract()) { success ->
+            val captured = cameraUriText?.let(Uri::parse)
+            if (success && captured != null) processPhoto(captured)
+            else {
+                cameraFileState.value?.delete()
+                cameraFileState.value = null
+                cameraFilePath = null
+                cameraUriText = null
+                scanMessage = "Captura cancelada ou a câmera não salvou a foto. Tente novamente ou use Arquivos."
+            }
+        }
+        fun openCamera() {
+            runCatching {
+                val dir = File(context.cacheDir, "capturas").apply { mkdirs() }
+                val file = File.createTempFile("cupom-", ".jpg", dir)
+                cameraFileState.value?.delete()
+                cameraFileState.value = file
+                cameraFilePath = file.absolutePath
+                val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+                cameraUriText = uri.toString()
+                camera.launch(uri)
+            }.onFailure { error ->
+                cameraFileState.value?.delete()
+                cameraFileState.value = null
+                cameraFilePath = null
+                cameraUriText = null
+                scanMessage = "Não foi possível abrir a câmera: ${error.message ?: "indisponível"}. Use Galeria ou Arquivos."
+            }
+        }
+        fun openGallery() {
+            runCatching {
+                gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+            }.onFailure { error ->
+                scanMessage = "Falha ao abrir galeria: ${error.message ?: "seletor indisponível"}. Tente Arquivos."
+            }
+        }
+        fun openFiles() {
+            runCatching { files.launch(arrayOf("image/*")) }
+                .onFailure { error -> scanMessage = "Falha ao abrir Arquivos: ${error.message ?: "seletor indisponível"}." }
         }
         val storedPhoto = remember(editing?.photoPath) {
             editing?.photoPath?.let { path ->
@@ -122,19 +181,21 @@ fun RegisterScreen(vm: AppViewModel, editing: CancellationEntity?, busy: Boolean
                     Text("Tire uma foto ou selecione uma imagem. A leitura ajuda a preencher os campos, mas exige conferência.",
                         style = MaterialTheme.typography.bodySmall, color = Grey)
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        OutlinedButton(onClick = {
-                            val file = File(context.cacheDir, "capturas/${System.currentTimeMillis()}.jpg")
-                            file.parentFile?.mkdirs()
-                            pendingCameraFile?.delete()
-                            pendingCameraFile = file
-                            pendingCamera = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-                            camera.launch(pendingCamera!!)
-                        }, modifier = Modifier.weight(1f), enabled = !scanning) {
-                            Icon(Icons.Default.PhotoCamera, null, Modifier.size(18.dp)); Spacer(Modifier.width(5.dp)); Text("Câmera")
+                        OutlinedButton(onClick = { openCamera() }, modifier = Modifier.weight(1f), enabled = !scanning) {
+                            Icon(Icons.Default.PhotoCamera, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(5.dp))
+                            Text("Câmera")
                         }
-                        OutlinedButton(onClick = { gallery.launch("image/*") }, modifier = Modifier.weight(1f), enabled = !scanning) {
-                            Icon(Icons.Default.PhotoLibrary, null, Modifier.size(18.dp)); Spacer(Modifier.width(5.dp)); Text("Galeria")
+                        OutlinedButton(onClick = { openGallery() }, modifier = Modifier.weight(1f), enabled = !scanning) {
+                            Icon(Icons.Default.PhotoLibrary, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(5.dp))
+                            Text("Galeria")
                         }
+                    }
+                    OutlinedButton(onClick = { openFiles() }, modifier = Modifier.fillMaxWidth(), enabled = !scanning) {
+                        Icon(Icons.Default.FolderOpen, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Selecionar em Arquivos")
                     }
                     if (scanning) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("Analisando cupom no dispositivo…", color = Grey) }
                     bitmap?.let { img ->
@@ -178,7 +239,15 @@ fun RegisterScreen(vm: AppViewModel, editing: CancellationEntity?, busy: Boolean
                     AppTextField(form.notes, { form = form.copy(notes = it) }, "Observações", singleLine = false, minLines = 3)
                 }
                 Button(enabled = !busy && !scanning && (!scanNeedsConfirmation || scanReviewed),
-                    onClick = { vm.save(form, photoUri, onDone) },
+                    onClick = {
+                        vm.save(form, photoUri) {
+                            cameraFileState.value?.delete()
+                            cameraFileState.value = null
+                            cameraFilePath = null
+                            cameraUriText = null
+                            onDone()
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(16.dp)) {
                     Icon(Icons.Default.CheckCircle, null)
                     Spacer(Modifier.width(9.dp))

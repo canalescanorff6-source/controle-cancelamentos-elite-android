@@ -46,7 +46,7 @@ fun CancelamentosApp(vm: AppViewModel) {
             Box(Modifier.fillMaxSize().background(CanvasColor)) {
                 if (!ready) {
                     Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        Image(painter = painterResource(R.drawable.elite_brand), contentDescription = null, modifier = Modifier.size(96.dp).clip(RoundedCornerShape(24.dp)))
+                        Image(painter = painterResource(R.drawable.elite_brand), contentDescription = null, modifier = Modifier.size(112.dp).clip(RoundedCornerShape(26.dp)))
                         Text("Controle de Cancelamentos Elite", color = Ink, style = MaterialTheme.typography.titleMedium)
                         CircularProgressIndicator(Modifier.size(28.dp))
                     }
@@ -93,27 +93,19 @@ fun CancelamentosApp(vm: AppViewModel) {
                                         .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(40.dp)
-                                            .clip(RoundedCornerShape(14.dp))
-                                            .background(Brush.linearGradient(listOf(Navy, NavyLight)))
-                                            .padding(6.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Image(
-                                            painter = painterResource(R.drawable.elite_brand),
-                                            contentDescription = "Logo do app",
-                                            modifier = Modifier.fillMaxSize()
-                                        )
-                                    }
-                                    Spacer(Modifier.width(10.dp))
+                                    Image(
+                                        painter = painterResource(R.drawable.elite_brand),
+                                        contentDescription = "Logo premium Controle Elite",
+                                        modifier = Modifier.size(46.dp).clip(RoundedCornerShape(13.dp))
+                                    )
+                                    Spacer(Modifier.width(12.dp))
                                     Column(Modifier.weight(1f)) {
-                                        Text(actor.name, style = MaterialTheme.typography.labelLarge, color = Color.White, maxLines = 1)
+                                        Text("CONTROLE ELITE", style = MaterialTheme.typography.labelSmall, color = Gold, fontWeight = FontWeight.Bold)
                                         Text(
-                                            if (actor.role == "ADMIN") "Administrador" else "Operador",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = Color(0xFFD3DEF1)
+                                            actor.name + " • " + (if (actor.role == "ADMIN") "Administrador" else "Operador"),
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = Color.White,
+                                            maxLines = 1
                                         )
                                     }
                                     TextButton(
@@ -262,20 +254,11 @@ private fun AccessScreen(
         Spacer(Modifier.height(18.dp))
         PremiumPanel(Modifier.padding(horizontal = 20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Box(
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Brush.linearGradient(listOf(Navy, NavyLight)))
-                        .padding(6.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Image(
-                        painter = painterResource(R.drawable.elite_brand),
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
+                Image(
+                    painter = painterResource(R.drawable.elite_brand),
+                    contentDescription = "Controle Elite",
+                    modifier = Modifier.size(48.dp).clip(RoundedCornerShape(14.dp))
+                )
                 Column {
                     SectionTitle(when {
                         isSetup -> "Criar administrador"
@@ -343,20 +326,11 @@ private fun BrandShowcase(modifier: Modifier = Modifier) {
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                Box(
-                    modifier = Modifier
-                        .size(70.dp)
-                        .clip(RoundedCornerShape(22.dp))
-                        .background(Color.White.copy(alpha = 0.08f))
-                        .padding(12.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Image(
-                        painter = painterResource(R.drawable.elite_brand),
-                        contentDescription = "Logo do Cancelamentos Elite",
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
+                Image(
+                    painter = painterResource(R.drawable.elite_brand),
+                    contentDescription = "Logo premium Controle Elite",
+                    modifier = Modifier.size(86.dp).clip(RoundedCornerShape(20.dp))
+                )
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(LocalBranding.current.appName, style = MaterialTheme.typography.titleLarge, color = Color.White, fontWeight = FontWeight.Bold)
                     Text("Controle profissional de cancelamentos", style = MaterialTheme.typography.bodyMedium, color = Color(0xFFDCE7FF))
@@ -364,7 +338,7 @@ private fun BrandShowcase(modifier: Modifier = Modifier) {
                 }
             }
             Text(
-                "Gestão segura de registros • Android nativo",
+                "IDENTIDADE PREMIUM • VERSÃO DE TESTES 3.2.1",
                 style = MaterialTheme.typography.labelSmall,
                 color = Color(0xFFC8D9FA)
             )

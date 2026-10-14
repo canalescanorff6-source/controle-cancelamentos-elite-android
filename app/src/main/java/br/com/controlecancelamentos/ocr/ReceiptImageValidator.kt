@@ -11,8 +11,8 @@ class InvalidReceiptImageException(message: String) : IllegalArgumentException(m
 /** Validação preventiva: nunca carregar fotografias gigantes sem verificar os limites. */
 object ReceiptImageValidator {
     private const val MAX_BYTES = 12L * 1024 * 1024
-    private const val MAX_PIXELS = 16_000_000L
-    private const val MAX_SIDE = 5500
+    private const val MAX_PIXELS = 130_000_000L
+    private const val MAX_SIDE = 20_000
 
     suspend fun validate(context: Context, uri: Uri) = withContext(Dispatchers.IO) {
         val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }

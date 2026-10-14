@@ -13,13 +13,16 @@ data class ReceiptCandidate(
     val pdv: String? = null,
     val ccf: String? = null,
     val notes: List<String> = emptyList()
-)
+) {
+    fun recognizedFields(): Int = listOf(coupon, amountCents, date, time, pdv, ccf).count { it != null }
+}
 
 object ReceiptParser {
     private val amountPattern = Regex("(?:R\\$\\s*)?([0-9]{1,3}(?:\\.[0-9]{3})*,[0-9]{2}|[0-9]+[.,][0-9]{2})")
     private val datePattern = Regex("\\b(\\d{2})[/.-](\\d{2})[/.-](\\d{4})\\b")
     private val timePattern = Regex("\\b([01]\\d|2[0-3]):([0-5]\\d)(?::[0-5]\\d)?\\b")
     private val couponPattern = Regex("(?:CUPOM(?:\\s+(?:N[º°O.]|NUMERO|FISCAL))?|COO|EXTRATO\\s+N[º°O.]?)\\s*[:#-]?\\s*(\\d{2,12})", RegexOption.IGNORE_CASE)
+    private val cooPattern = Regex("\\bC[O0]{2}\\s*[:#=.-]?\\s*(\\d{2,12})\\b", RegexOption.IGNORE_CASE)
     private val pdvPattern = Regex("(?:PDV|CAIXA|ECF)\\s*[:#-]?\\s*(\\d{1,8})", RegexOption.IGNORE_CASE)
     private val ccfPattern = Regex("CCF\\s*[:#-]?\\s*(\\d{1,12})", RegexOption.IGNORE_CASE)
     private val totalLabel = Regex("^(?:(?:VALOR\\s+)?TOTAL(?:\\s+(?:A\\s+PAGAR|DA\\s+VENDA))?|VALOR\\s+A\\s+PAGAR|TOTAL\\s+PAGO|VALOR\\s+FINAL)\\b", RegexOption.IGNORE_CASE)
@@ -43,7 +46,7 @@ object ReceiptParser {
             try { LocalDate.parse(iso).format(DateTimeFormatter.ofPattern("dd/MM/uuuu")) } catch (_: Exception) { null }
         }
         val found = ReceiptCandidate(
-            coupon = couponPattern.find(all)?.groupValues?.get(1),
+            coupon = cooPattern.find(all)?.groupValues?.get(1) ?: couponPattern.find(all)?.groupValues?.get(1),
             amountCents = amount,
             date = date,
             time = timePattern.find(all)?.value?.take(5),
@@ -51,7 +54,7 @@ object ReceiptParser {
             ccf = ccfPattern.find(all)?.groupValues?.get(1)
         )
         val cautions = buildList {
-            if (found.coupon == null) add("Número do cupom não identificado")
+            if (found.coupon == null) add("COO / número do cupom não identificado")
             if (found.amountCents == null) add("Valor total não identificado com segurança")
             if (found.date == null) add("Data não identificada")
             add("Confira todos os dados com o cupom original antes de salvar")

@@ -189,8 +189,8 @@ fun AdminScreen(vm: AppViewModel, onLogout: () -> Unit) {
             }
             PremiumPanel {
                 Icon(Icons.Default.Backup, null, tint = MaterialTheme.colorScheme.primary)
-                SectionTitle("Backup seguro / troca de aparelho")
-                Text("Exporte lojas, cancelamentos ativos e identidade visual em um arquivo AES-256-GCM protegido por senha. Fotos, usuários e senhas de login não entram no backup.",
+                SectionTitle("Backup criptografado de registros")
+                Text("Backup parcial AES-256-GCM: inclui lojas, cancelamentos ativos e identidade visual. NÃO inclui fotos dos cupons, usuários, senhas ou registros excluídos. Não substitui uma migração completa do aparelho.",
                     style = MaterialTheme.typography.bodySmall, color = Grey)
                 OutlinedTextField(backupPassword, { backupPassword = it }, modifier = Modifier.fillMaxWidth(),
                     label = { Text("Senha do backup (mín. 10 caracteres)") }, singleLine = true,
@@ -214,7 +214,7 @@ fun AdminScreen(vm: AppViewModel, onLogout: () -> Unit) {
                 }
                 Text("Para restaurar, digite a senha do arquivo e selecione o .ccel. Confira o resumo e confirme a importação; registros existentes são preservados.",
                     color = Grey, style = MaterialTheme.typography.bodySmall)
-                Text("A senha do backup não pode ser recuperada. Guarde uma cópia segura do arquivo antes de desinstalar.",
+                Text("ATENÇÃO: antes de trocar ou desinstalar o aplicativo, preserve as fotografias separadamente. A senha do backup não pode ser recuperada.",
                     style = MaterialTheme.typography.labelSmall, color = Grey)
             }
             PremiumPanel {
