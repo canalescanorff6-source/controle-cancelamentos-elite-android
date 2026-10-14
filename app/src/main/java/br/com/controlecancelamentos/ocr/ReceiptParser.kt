@@ -21,10 +21,11 @@ data class ReceiptCandidate(
 )
 
 object ReceiptParser {
-    private val amountPattern = Regex("(?:R\\$\\s*)?([0-9]{1,3}(?:\\.[0-9]{3})*,[0-9]{2}|[0-9]+[.,][0-9]{2})")
+    private val amountPattern = Regex("""(?<!\d)(?:R\s*\$\s*)?(\d{1,3}(?:\.\d{3})*,\s*\d{2}|\d{1,9}[.,]\s*\d{2})(?!\d)""")
     private val datePattern = Regex("\\b(\\d{2})[/.-](\\d{2})[/.-](\\d{4})\\b")
     private val timePattern = Regex("\\b([01]\\d|2[0-3]):([0-5]\\d)(?::[0-5]\\d)?\\b")
-    private val couponPattern = Regex("(?:CUPOM(?:\\s+(?:N[º°O.]|NUMERO|FISCAL))?|COO|EXTRATO\\s+N[º°O.]?)\\s*[:#-]?\\s*(\\d{2,12})", RegexOption.IGNORE_CASE)
+    private val cooPattern = Regex("""(?i)(?<![\p{L}\d])C\s*[O0Q]\s*[O0Q]\s*[:#=.-]?\s*(\d(?:[\d ]{1,13}))""")
+    private val couponPattern = Regex("""(?i)(?<![\p{L}\d])(?:CUPOM(?:\s+(?:N[º°O.]?|NUMERO|FISCAL))?|EXTRATO\s+N[º°O.]?)\s*[:#=.-]?\s*(\d{2,12})""")
     private val pdvPattern = Regex("(?:PDV|CAIXA|ECF)\\s*[:#-]?\\s*(\\d{1,8})", RegexOption.IGNORE_CASE)
     private val ccfPattern = Regex("CCF\\s*[:#-]?\\s*(\\d{1,12})", RegexOption.IGNORE_CASE)
     private val totalLabel = Regex("^(?:(?:VALOR\\s+)?TOTAL(?:\\s+(?:A\\s+PAGAR|DA\\s+VENDA|DO\\s+CUPOM|PAGO|LIQUIDO|CANCELADO))?|VALOR\\s+(?:A\\s+PAGAR|FINAL|LIQUIDO|DO\\s+CUPOM|CANCELADO|DO\\s+CANCELAMENTO)|VLR\\.?\\s*TOTAL|TOTAL\\s+(?:A\\s+PAGAR|PAGO|CANCELADO|DO\\s+CANCELAMENTO))\\b", RegexOption.IGNORE_CASE)
@@ -37,12 +38,29 @@ object ReceiptParser {
         val stronglyLabeled = Regex("^(?:VALOR\\s+(?:TOTAL|A\\s+PAGAR|CANCELADO|DO\\s+CANCELAMENTO|FINAL|LIQUIDO)|TOTAL\\s+(?:A\\s+PAGAR|PAGO|CANCELADO|DO\\s+CANCELAMENTO)|VLR\\.?\\s*TOTAL)", RegexOption.IGNORE_CASE)
         val labelled = lines.withIndex().filter { totalLabel.containsMatchIn(it.value) && !excluded.containsMatchIn(it.value) }
         val prioritized = labelled.filter { stronglyLabeled.containsMatchIn(it.value) }.ifEmpty { labelled }
-        val amount = prioritized.asReversed().firstNotNullOfOrNull { indexed ->
-            amountPattern.findAll(indexed.value).mapNotNull { parseMoney(it.groupValues[1]) }.lastOrNull()
-                ?: lines.getOrNull(indexed.index + 1)?.takeIf {
-                    it.matches(Regex("^(?:R\\$\\s*)?[0-9.,]+$"))
-                }?.let { parseMoney(it) }
+
+        fun moneyIn(fragment: String): Long? {
+            val values = amountPattern.findAll(fragment).mapNotNull {
+                parseMoney(it.groupValues[1].replace(Regex("""\s+"""), ""))
+            }.distinct().toList()
+            // Números monetários diferentes em uma mesma área exigem conferência manual.
+            return values.singleOrNull()
         }
+        fun moneyFor(index: Int): Long? {
+            val line = lines[index]
+            val labelMatch = totalLabel.find(line) ?: return null
+            moneyIn(line.substring(labelMatch.range.last + 1))?.let { return it }
+            // O ML Kit às vezes entrega "TOTAL R$", "R$" e "64,34" em blocos separados.
+            val first = lines.getOrNull(index + 1) ?: return null
+            val second = lines.getOrNull(index + 2)
+            val standalone = Regex("""^(?:R\s*\$\s*)?\d{1,9}\s*[.,]\s*\d{2}$""", RegexOption.IGNORE_CASE)
+            if (standalone.matches(first)) return moneyIn(first)
+            if (first.matches(Regex("""^R\s*\$$""", RegexOption.IGNORE_CASE)) &&
+                second != null && standalone.matches(second)) return moneyIn(second)
+            return null
+        }
+        val amountValues = prioritized.mapNotNull { moneyFor(it.index) }.distinct()
+        val amount = amountValues.singleOrNull()
         val date = datePattern.find(all)?.let { match ->
             val iso = "${match.groupValues[3]}-${match.groupValues[2]}-${match.groupValues[1]}"
             try { LocalDate.parse(iso).format(DateTimeFormatter.ofPattern("dd/MM/uuuu")) } catch (_: Exception) { null }
@@ -55,7 +73,8 @@ object ReceiptParser {
                 !it.equals("nao informado", ignoreCase = true) }
         }
         val found = ReceiptCandidate(
-            coupon = couponPattern.find(all)?.groupValues?.get(1),
+            coupon = (cooPattern.find(all)?.groupValues?.get(1)
+                ?: couponPattern.find(all)?.groupValues?.get(1))?.replace(" ", ""),
             amountCents = amount,
             date = date,
             time = timePattern.find(all)?.value?.take(5),
