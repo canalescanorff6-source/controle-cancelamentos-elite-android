@@ -58,6 +58,39 @@ jobs:
       - name: Compilar APK instalável de depuração
         run: gradle --no-daemon --stacktrace assembleDebug
 
+      - name: Habilitar aceleração para emulador Android
+        run: |
+          if [ -e /dev/kvm ]; then
+            sudo chmod 666 /dev/kvm
+          fi
+
+      - name: Teste de instalação Android em emulador (API 35)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_4
+          disable-animations: true
+          emulator-boot-timeout: 900
+          script: |
+            set -euo pipefail
+            package="br.com.controlecancelamentos.teste.visual"
+            apk="app/build/outputs/apk/debug/app-debug.apk"
+            test -s "$apk"
+            adb wait-for-device
+            adb install -r "$apk"
+            adb shell pm path "$package" | grep -q "package:"
+            adb logcat -c
+            adb shell am start -W -n "$package/br.com.controlecancelamentos.MainActivity"
+            sleep 8
+            if ! adb shell pidof "$package" | grep -q '[0-9]'; then
+              adb logcat -d -t 400 | tail -n 120
+              echo "ERRO: app não permaneceu ativo após inicialização"
+              exit 1
+            fi
+            echo "PASSOU: APK instalado, activity iniciada e processo ativo no Android 15/API 35"
+
       - name: Validar release com assinatura temporária de CI (não distribuir)
         shell: bash
         run: |
