@@ -75,7 +75,7 @@ object ReceiptSpatialMatcher {
                 val toRight = valueBox.left >= label.right - 8
                 if (!toRight || separation > toleratedY) null
                 else Triple(valueBox, value, separation)
-            }.sortedWith(compareBy<Triple<ReceiptSegment, T>> { it.third }
+            }.sortedWith(compareBy<Triple<ReceiptSegment, T, Int>> { it.third }
                 .thenBy { it.first.left - label.right })
             val chosen = candidates.firstOrNull() ?: return@mapNotNull null
             val rival = candidates.getOrNull(1)
