@@ -377,6 +377,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val snapshot = pendingRestore ?: return@launch
         val complete = pendingCompleteRestore
         val newPhotoFiles = mutableListOf<File>()
+        var databaseCommitted = false
         busy.value = true
         try {
             val (count, copiedPhotos) = withContext(Dispatchers.IO) {
@@ -439,11 +440,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     imported to photoCount
                 }
             }
-            BrandingStore.save(context, snapshot.brand)
-            branding.value = snapshot.brand
-            notify("Restauração concluída: $count registro(s) e $copiedPhotos foto(s). Registros anteriores preservados.")
+            databaseCommitted = true
+            val brandingSaved = runCatching { BrandingStore.save(context, snapshot.brand) }.isSuccess
+            if (brandingSaved) branding.value = snapshot.brand
+            notify("Restauração concluída: $count registro(s) e $copiedPhotos foto(s). " +
+                (if (brandingSaved) "Dados anteriores preservados."
+                 else "Dados preservados; não foi possível atualizar a identidade visual."))
         } catch (e: Exception) {
-            withContext(Dispatchers.IO) { newPhotoFiles.forEach { it.delete() } }
+            if (!databaseCommitted) withContext(Dispatchers.IO) { newPhotoFiles.forEach { it.delete() } }
             notify("Restauração não concluída: ${e.message ?: "confira espaço e dados"}. O banco não foi importado.")
         } finally { dismissRestore(); busy.value = false }
     }
