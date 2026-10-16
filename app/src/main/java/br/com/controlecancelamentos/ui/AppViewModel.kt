@@ -47,6 +47,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     init {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
+                // Cadastro inicial idempotente: preserva IDs, nomes e cancelamentos anteriores.
+                db.withTransaction {
+                    val missing = StoreCatalog.missing(dao.snapshotStores())
+                    missing.forEach { dao.insertStore(StoreEntity(name = it.displayName)) }
+                }
                 val existing = dao.getUsers()
                 requiresSetup.value = existing.isEmpty()
                 val uid = prefs.getString("userId", null)
@@ -202,6 +207,27 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             notify("Registro excluído da listagem. Histórico preservado.")
         } catch (_: Exception) { notify("Falha ao excluir. Tente novamente.") }
+    }
+
+    fun restoreStoreCatalog() = viewModelScope.launch {
+        if (session.value?.role != "ADMIN") {
+            notify("Somente o administrador pode gerenciar o catálogo de lojas.")
+            return@launch
+        }
+        busy.value = true
+        try {
+            val number = withContext(Dispatchers.IO) {
+                db.withTransaction {
+                    val missing = StoreCatalog.missing(dao.snapshotStores())
+                    missing.forEach { dao.insertStore(StoreEntity(name = it.displayName)) }
+                    missing.size
+                }
+            }
+            notify(if (number == 0) "As 15 unidades já constam no catálogo ou há registros com os mesmos códigos."
+                   else "$number unidade(s) adicionada(s). As lojas existentes foram preservadas.")
+        } catch (_: Exception) {
+            notify("Não foi possível atualizar o catálogo de lojas.")
+        } finally { busy.value = false }
     }
 
     fun addStore(name: String) = viewModelScope.launch {
