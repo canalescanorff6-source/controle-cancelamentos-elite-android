@@ -80,6 +80,29 @@ jobs:
       - name: Compilar APK e testes instrumentados
         run: gradle --no-daemon --stacktrace assembleDebug assembleRelease assembleDebugAndroidTest
 
+      - name: Testar criacao, recuperacao e assinatura permanente em CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f .github/android-signing/elite-release.enc.json ]; then
+            echo "Identidade permanente já existe. Não gerar certificado de teste sobre a oficial."
+          else
+            export ANDROID_RELEASE_SECRET
+            ANDROID_RELEASE_SECRET="$(python3 - <<'PY'
+          import secrets
+          print(secrets.token_urlsafe(48))
+          PY
+            )"
+            export ELITE_TAG=v4.3.99999
+            trap 'rm -f .github/android-signing/elite-release.enc.json; rm -rf dist' EXIT
+            node tools/elite-signing.cjs init
+            node tools/elite-signing.cjs sign
+            test -s dist/Controle_Cancelamentos_Elite_v4.3.99999.apk
+            (cd dist && sha256sum -c checksum-sha256.txt)
+            "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose dist/Controle_Cancelamentos_Elite_v4.3.99999.apk
+            echo "Fluxo de criação e assinatura protegido validado em CI."
+          fi
+
       - name: Verificar artefato APK
         shell: bash
         run: |
