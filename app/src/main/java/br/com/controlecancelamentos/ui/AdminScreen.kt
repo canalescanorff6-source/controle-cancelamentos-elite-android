@@ -127,8 +127,50 @@ fun AdminScreen(vm: AppViewModel, onLogout: () -> Unit) {
                     vm.setAppearance(when (selected) { "Claro" -> 1; "Escuro" -> 2; else -> 0 })
                 }
             }
+            UpdatePanel()
+            PremiumPanel {
+                Icon(Icons.Default.Backup, null, tint = MaterialTheme.colorScheme.primary)
+                SectionTitle("Backup criptografado e restauração")
+                Text("Exporte lojas, cancelamentos ativos e identidade visual em um arquivo AES-256-GCM protegido por senha. Atenção: fotos dos cupons, usuários e senhas não entram neste formato de backup. Guarde as fotos separadamente.",
+                    style = MaterialTheme.typography.bodySmall, color = Grey)
+                OutlinedTextField(backupPassword, { backupPassword = it }, modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Senha do backup (mín. 10 caracteres)") }, singleLine = true,
+                    visualTransformation = PasswordVisualTransformation())
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = {
+                        vm.exportEncryptedBackup(backupPassword) { bytes ->
+                            pendingBackup = bytes
+                            backupPassword = ""
+                            saveBackup.launch("cancelamentos-elite-backup.ccel")
+                        }
+                    }, enabled = !busy && backupPassword.length >= 10, modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 6.dp)) {
+                        Icon(Icons.Default.FileUpload, null, Modifier.size(17.dp)); Spacer(Modifier.width(5.dp)); Text("Exportar")
+                    }
+                    OutlinedButton(onClick = { selectBackup.launch(arrayOf("*/*")) },
+                        enabled = !busy && backupPassword.isNotBlank(), modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 6.dp)) {
+                        Icon(Icons.Default.FileDownload, null, Modifier.size(17.dp)); Spacer(Modifier.width(5.dp)); Text("Restaurar")
+                    }
+                }
+                Text("Para restaurar, digite a senha do arquivo e selecione o .ccel. Confira o resumo e confirme a importação; registros existentes são preservados.",
+                    color = Grey, style = MaterialTheme.typography.bodySmall)
+                Text("A senha não pode ser recuperada. Faça backup antes de reinstalar ou trocar de aparelho e confira se o arquivo foi salvo.",
+                    style = MaterialTheme.typography.labelSmall, color = Grey)
+            }
             PremiumPanel {
                 SectionTitle("Lojas cadastradas")
+                Text("Catálogo de 15 unidades com código fixo. O aplicativo adiciona as faltantes sem apagar lojas e registros existentes.",
+                    color = Grey, style = MaterialTheme.typography.bodySmall)
+                OutlinedButton(
+                    onClick = { vm.restoreStoreCatalog() },
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Store, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(7.dp))
+                    Text("Verificar e completar 15 lojas")
+                }
                 AppTextField(storeName, { storeName = it }, "Nome da nova loja")
                 Button(onClick = { vm.addStore(storeName); storeName = "" }, enabled = storeName.isNotBlank()) {
                     Icon(Icons.Default.AddBusiness, null); Spacer(Modifier.width(7.dp)); Text("Adicionar loja")
@@ -186,36 +228,6 @@ fun AdminScreen(vm: AppViewModel, onLogout: () -> Unit) {
                     }
                     HorizontalDivider(color = CanvasColor)
                 }
-            }
-            PremiumPanel {
-                Icon(Icons.Default.Backup, null, tint = MaterialTheme.colorScheme.primary)
-                SectionTitle("Backup seguro / troca de aparelho")
-                Text("Exporte lojas, cancelamentos ativos e identidade visual em um arquivo AES-256-GCM protegido por senha. Fotos, usuários e senhas de login não entram no backup.",
-                    style = MaterialTheme.typography.bodySmall, color = Grey)
-                OutlinedTextField(backupPassword, { backupPassword = it }, modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Senha do backup (mín. 10 caracteres)") }, singleLine = true,
-                    visualTransformation = PasswordVisualTransformation())
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = {
-                        vm.exportEncryptedBackup(backupPassword) { bytes ->
-                            pendingBackup = bytes
-                            backupPassword = ""
-                            saveBackup.launch("cancelamentos-elite-backup.ccel")
-                        }
-                    }, enabled = !busy && backupPassword.length >= 10, modifier = Modifier.weight(1f),
-                        contentPadding = PaddingValues(horizontal = 6.dp)) {
-                        Icon(Icons.Default.FileUpload, null, Modifier.size(17.dp)); Spacer(Modifier.width(5.dp)); Text("Exportar")
-                    }
-                    OutlinedButton(onClick = { selectBackup.launch(arrayOf("*/*")) },
-                        enabled = !busy && backupPassword.isNotBlank(), modifier = Modifier.weight(1f),
-                        contentPadding = PaddingValues(horizontal = 6.dp)) {
-                        Icon(Icons.Default.FileDownload, null, Modifier.size(17.dp)); Spacer(Modifier.width(5.dp)); Text("Restaurar")
-                    }
-                }
-                Text("Para restaurar, digite a senha do arquivo e selecione o .ccel. Confira o resumo e confirme a importação; registros existentes são preservados.",
-                    color = Grey, style = MaterialTheme.typography.bodySmall)
-                Text("A senha do backup não pode ser recuperada. Guarde uma cópia segura do arquivo antes de desinstalar.",
-                    style = MaterialTheme.typography.labelSmall, color = Grey)
             }
             PremiumPanel {
                 SectionTitle("Privacidade")
