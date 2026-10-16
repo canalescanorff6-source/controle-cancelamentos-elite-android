@@ -1,0 +1,87 @@
+name: Android | Release assinado para atualizador
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Obter fontes
+        uses: actions/checkout@v4
+
+      - name: Verificar integridade e versao
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/check_source.py
+          python3 - <<'PY'
+          import os, pathlib, re
+          gradle = pathlib.Path("app/build.gradle.kts").read_text()
+          version = re.search(r'versionName\s*=\s*"([^"]+)"', gradle)
+          assert version, "versionName nao informado"
+          assert "v"+version.group(1) == os.environ["GITHUB_REF_NAME"], "Tag nao confere com versionName"
+          PY
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+
+      - name: Instalar Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install "platforms;android-36" "build-tools;35.0.0"
+          printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Testar e compilar release sem assinatura
+        run: gradle --no-daemon --stacktrace testDebugUnitTest assembleRelease
+
+      - name: Assinar, verificar, publicar APK
+        env:
+          GH_TOKEN: \${{ github.token }}
+          ELITE_KEYSTORE_BASE64: \${{ secrets.ELITE_KEYSTORE_BASE64 }}
+          ELITE_KEYSTORE_PASSWORD: \${{ secrets.ELITE_KEYSTORE_PASSWORD }}
+          ELITE_KEY_ALIAS: \${{ secrets.ELITE_KEY_ALIAS }}
+          ELITE_KEY_PASSWORD: \${{ secrets.ELITE_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for env_var in ELITE_KEYSTORE_BASE64 ELITE_KEYSTORE_PASSWORD ELITE_KEY_ALIAS ELITE_KEY_PASSWORD; do
+            if [ -z "\${!env_var:-}" ]; then
+              echo "::error::Configure o segredo $env_var antes de publicar um Release"
+              exit 1
+            fi
+          done
+          KEYSTORE="$RUNNER_TEMP/elite-release.jks"
+          printf '%s' "$ELITE_KEYSTORE_BASE64" | base64 -d > "$KEYSTORE"
+          chmod 600 "$KEYSTORE"
+          unsigned="app/build/outputs/apk/release/app-release-unsigned.apk"
+          test -s "$unsigned"
+          tools="$ANDROID_HOME/build-tools/35.0.0"
+          "$tools/zipalign" -p -f 4 "$unsigned" "$RUNNER_TEMP/elite-aligned.apk"
+          mkdir -p dist
+          apk="dist/Controle_Cancelamentos_Elite_$GITHUB_REF_NAME.apk"
+          "$tools/apksigner" sign --ks "$KEYSTORE" --ks-key-alias "$ELITE_KEY_ALIAS" \
+            --ks-pass env:ELITE_KEYSTORE_PASSWORD --key-pass env:ELITE_KEY_PASSWORD \
+            --out "$apk" "$RUNNER_TEMP/elite-aligned.apk"
+          "$tools/apksigner" verify --verbose "$apk"
+          (cd dist && sha256sum "$(basename "$apk")" > checksum-sha256.txt)
+          gh release create "$GITHUB_REF_NAME" "$apk" dist/checksum-sha256.txt \
+            --verify-tag --generate-notes --title "Controle Elite $GITHUB_REF_NAME"
+          rm -f "$KEYSTORE"
