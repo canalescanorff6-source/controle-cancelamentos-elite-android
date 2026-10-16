@@ -84,7 +84,7 @@ object ReceiptParser {
             fiscalName = person("FISCAL DE CAIXA"),
             managerName = person("GERENTE"),
             lossPreventionName = person("PREVENÇÃO DE PERDAS|PREVENCAO DE PERDAS"),
-            headerLines = lines.take(12)
+            headerLines = lines
         )
         val cautions = buildList {
             if (found.coupon == null) add("Número do cupom não identificado")
