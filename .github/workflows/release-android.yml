@@ -1,0 +1,189 @@
+name: Android | APK oficial e atualizador
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: elite-official-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Gerar e publicar APK permanente
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+      - name: Instalar Android SDK
+        run: |
+          set -euo pipefail
+          sdkmanager --install "platforms;android-36" "build-tools;35.0.0"
+          printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Validar segredos sem revelar valores
+        id: signing
+        env:
+          MASTER: ${{ secrets.ANDROID_RELEASE_SECRET }}
+          KEY64: ${{ secrets.ELITE_KEYSTORE_BASE64 }}
+          STOREPASS: ${{ secrets.ELITE_KEYSTORE_PASSWORD }}
+          KEYALIAS: ${{ secrets.ELITE_KEY_ALIAS }}
+          KEYPASS: ${{ secrets.ELITE_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          count=0
+          for value in "$KEY64" "$STOREPASS" "$KEYALIAS" "$KEYPASS"; do
+            if [ -n "$value" ]; then count=$((count+1)); fi
+          done
+          if [ -n "$MASTER" ]; then
+            echo 'mode=master' >> "$GITHUB_OUTPUT"
+            echo 'Assinatura mestre configurada.' >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$count" -eq 4 ]; then
+            echo 'mode=legacy' >> "$GITHUB_OUTPUT"
+            echo 'Assinatura legada de quatro segredos configurada.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '::error::Configure ANDROID_RELEASE_SECRET neste repositório. Segredos do Scout PRO não são compartilhados.'
+            exit 1
+          fi
+
+      - name: Inicializar identidade Android criptografada uma única vez
+        if: steps.signing.outputs.mode == 'master'
+        env:
+          ANDROID_RELEASE_SECRET: ${{ secrets.ANDROID_RELEASE_SECRET }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -e .github/android-signing/elite-release.enc.json ]; then
+            node tools/elite-signing.cjs init
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add .github/android-signing/elite-release.enc.json
+            git commit -m 'chore(signing): proteger identidade permanente do Controle Elite [skip ci]'
+            git push origin HEAD:main
+          fi
+          node tools/elite-signing.cjs check
+
+      - name: Impedir troca de certificado permanente
+        if: steps.signing.outputs.mode == 'legacy'
+        run: |
+          if [ -f .github/android-signing/elite-release.enc.json ]; then
+            echo '::error::Certificado mestre já configurado; não mudar de chave.'
+            exit 1
+          fi
+
+      - name: Validar código antes de alterar a versão de distribuição
+        run: |
+          python3 tools/check_source.py
+          node tools/elite-signing.cjs check
+
+      - name: Calcular versão incremental a cada atualização na main
+        id: version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, pathlib, re
+          f=pathlib.Path('app/build.gradle.kts')
+          s=f.read_text()
+          m=re.search(r'versionName\s*=\s*"(\d+)\.(\d+)\.(\d+)"',s)
+          assert m, "versionName invalido"
+          number=int(os.environ['GITHUB_RUN_NUMBER'])
+          name=f'{m.group(1)}.{m.group(2)}.{number}'
+          code=1000000+number
+          s,n1=re.subn(r'(versionCode\s*=\s*)\d+',lambda x:x.group(1)+str(code),s,count=1)
+          s,n2=re.subn(r'(versionName\s*=\s*)"[^"]+"',lambda x:x.group(1)+'"'+name+'"',s,count=1)
+          assert n1==1 and n2==1
+          f.write_text(s)
+          with open(os.environ['GITHUB_OUTPUT'],'a') as out:
+            out.write('tag=v'+name+'\n')
+            out.write('code='+str(code)+'\n')
+          print('Android oficial: '+name+' (versionCode '+str(code)+')')
+          PY
+          tag="$(grep '^tag=' "$GITHUB_OUTPUT" | cut -d= -f2)"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo '::error::Release com esta versão já existe. Não sobrescrever.'
+            exit 1
+          fi
+
+      - name: Testar e gerar APK release
+        run: gradle --no-daemon --stacktrace testDebugUnitTest assembleRelease
+
+      - name: Assinar com identidade permanente (segredo único)
+        if: steps.signing.outputs.mode == 'master'
+        env:
+          ANDROID_RELEASE_SECRET: ${{ secrets.ANDROID_RELEASE_SECRET }}
+          ELITE_TAG: ${{ steps.version.outputs.tag }}
+        run: node tools/elite-signing.cjs sign
+
+      - name: Assinar com identidade preexistente de quatro segredos
+        if: steps.signing.outputs.mode == 'legacy'
+        shell: bash
+        env:
+          KEY64: ${{ secrets.ELITE_KEYSTORE_BASE64 }}
+          STOREPASS: ${{ secrets.ELITE_KEYSTORE_PASSWORD }}
+          KEYALIAS: ${{ secrets.ELITE_KEY_ALIAS }}
+          KEYPASS: ${{ secrets.ELITE_KEY_PASSWORD }}
+          ELITE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          trap 'rm -f "$RUNNER_TEMP/elite-release.jks" "$RUNNER_TEMP/elite-aligned.apk"' EXIT
+          printf '%s' "$KEY64" | base64 -d > "$RUNNER_TEMP/elite-release.jks"
+          chmod 600 "$RUNNER_TEMP/elite-release.jks"
+          tools="$ANDROID_HOME/build-tools/35.0.0"
+          "$tools/zipalign" -p -f 4 app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/elite-aligned.apk"
+          mkdir -p dist
+          apk="dist/Controle_Cancelamentos_Elite_$ELITE_TAG.apk"
+          "$tools/apksigner" sign --ks "$RUNNER_TEMP/elite-release.jks" --ks-key-alias "$KEYALIAS" \
+            --ks-pass env:STOREPASS --key-pass env:KEYPASS --out "$apk" "$RUNNER_TEMP/elite-aligned.apk"
+          "$tools/apksigner" verify --verbose "$apk"
+          (cd dist && sha256sum "$(basename "$apk")" > checksum-sha256.txt)
+
+      - name: Validar identificador, assinatura e SHA-256 do APK
+        shell: bash
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          CODE: ${{ steps.version.outputs.code }}
+        run: |
+          set -euo pipefail
+          apk="dist/Controle_Cancelamentos_Elite_$TAG.apk"
+          test -s "$apk"
+          (cd dist && sha256sum -c checksum-sha256.txt)
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$apk"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$apk" > "$RUNNER_TEMP/badging.txt"
+          grep -Fq "package: name='br.com.controlecancelamentos' versionCode='$CODE' versionName='" "$RUNNER_TEMP/badging.txt"
+
+      - name: Publicar APK para botão Atualizar
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" dist/Controle_Cancelamentos_Elite_*.apk dist/checksum-sha256.txt \
+            --target "$(git rev-parse HEAD)" --generate-notes \
+            --title "Controle de Cancelamentos Elite $TAG" --latest
+          echo "APK oficial publicado para atualização: $TAG" >> "$GITHUB_STEP_SUMMARY"

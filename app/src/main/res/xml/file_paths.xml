@@ -3,4 +3,5 @@
     <cache-path name="capturas" path="capturas/" />
     <cache-path name="relatorios" path="relatorios/" />
     <files-path name="cupons" path="cupons/" />
+    <cache-path name="atualizacoes" path="atualizacoes/" />
 </paths>

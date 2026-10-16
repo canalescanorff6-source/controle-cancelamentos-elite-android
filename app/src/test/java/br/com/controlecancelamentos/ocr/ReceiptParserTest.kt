@@ -61,4 +61,27 @@ TROCO 5,00""")
         assertNull(parseMoney("abc"))
         assertNull(parseMoney("10,999"))
     }
+    @Test fun `extrai equipe declarada no cupom sem adivinhar`() {
+        val result = ReceiptParser.parse("""
+            MERCADO MODELO
+            OPERADOR: 0007 - Maria Silva
+            FISCAL DE CAIXA: Joana Lima
+            GERENTE: Carlos Alves
+            PREVENCAO DE PERDAS: Paulo Lima
+            CUPOM 000321
+            TOTAL CANCELADO 79,90
+        """.trimIndent())
+        assertEquals("Maria Silva", result.operatorName)
+        assertEquals("Joana Lima", result.fiscalName)
+        assertEquals("Carlos Alves", result.managerName)
+        assertEquals("Paulo Lima", result.lossPreventionName)
+        assertEquals(7990L, result.amountCents)
+        assertEquals("MERCADO MODELO", ReceiptParser.matchStore(result, listOf("MERCADO MODELO", "MERCADO 2")))
+    }
+
+    @Test fun `loja ambigua nao e selecionada`() {
+        val result = ReceiptParser.parse("LOJA: MERCADO MODELO\nTOTAL A PAGAR 10,25")
+        assertNull(ReceiptParser.matchStore(result, listOf("Mercado Modelo", "MERCADO MODELO")))
+        assertEquals(1025L, result.amountCents)
+    }
 }

@@ -123,6 +123,8 @@ interface AppDao {
     fun cancellations(): Flow<List<CancellationEntity>>
     @Query("SELECT * FROM cancellations WHERE deletedAt IS NULL ORDER BY dateIso DESC")
     suspend fun snapshotCancellations(): List<CancellationEntity>
+    @Query("SELECT * FROM cancellations WHERE id=:recordId AND deletedAt IS NULL LIMIT 1")
+    suspend fun cancellationById(recordId: String): CancellationEntity?
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun importCancellation(item: CancellationEntity): Long
     @Query("""SELECT COUNT(*) FROM cancellations WHERE deletedAt IS NULL
         AND dateIso=:dateIso AND coupon=:coupon

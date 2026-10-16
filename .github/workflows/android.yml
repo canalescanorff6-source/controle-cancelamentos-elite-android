@@ -28,6 +28,29 @@ jobs:
           python3 tools/check_source.py
           git diff --check
 
+      - name: Conferir integridade do assinador oficial
+        run: |
+          node --check tools/elite-signing.cjs
+          node tools/elite-signing.cjs check
+
+      - name: Verificar presença de segredos sem expor valores
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          MASTER: ${{ secrets.ANDROID_RELEASE_SECRET }}
+          KEY64: ${{ secrets.ELITE_KEYSTORE_BASE64 }}
+          STOREPASS: ${{ secrets.ELITE_KEYSTORE_PASSWORD }}
+          KEYALIAS: ${{ secrets.ELITE_KEY_ALIAS }}
+          KEYPASS: ${{ secrets.ELITE_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          if [ -n "$MASTER" ]; then
+            echo 'Segredo mestre ANDROID_RELEASE_SECRET: CONFIGURADO' | tee -a "$GITHUB_STEP_SUMMARY"
+          elif [ -n "$KEY64" ] && [ -n "$STOREPASS" ] && [ -n "$KEYALIAS" ] && [ -n "$KEYPASS" ]; then
+            echo 'Assinatura legada ELITE_KEYSTORE_*: CONFIGURADA' | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Assinatura permanente: NÃO CONFIGURADA neste repositório (configure antes de publicar)' | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Configurar Java 17
         uses: actions/setup-java@v4
         with:
@@ -54,8 +77,31 @@ jobs:
       - name: Testes unitários Android/JVM
         run: gradle --no-daemon --stacktrace testDebugUnitTest
 
-      - name: Compilar APK instalável de depuração
-        run: gradle --no-daemon --stacktrace assembleDebug
+      - name: Compilar APK e testes instrumentados
+        run: gradle --no-daemon --stacktrace assembleDebug assembleRelease assembleDebugAndroidTest
+
+      - name: Testar criacao, recuperacao e assinatura permanente em CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f .github/android-signing/elite-release.enc.json ]; then
+            echo "Identidade permanente já existe. Não gerar certificado de teste sobre a oficial."
+          else
+            export ANDROID_RELEASE_SECRET
+            ANDROID_RELEASE_SECRET="$(python3 - <<'PY'
+          import secrets
+          print(secrets.token_urlsafe(48))
+          PY
+            )"
+            export ELITE_TAG=v4.3.99999
+            trap 'rm -f .github/android-signing/elite-release.enc.json; rm -rf dist' EXIT
+            node tools/elite-signing.cjs init
+            node tools/elite-signing.cjs sign
+            test -s dist/Controle_Cancelamentos_Elite_v4.3.99999.apk
+            (cd dist && sha256sum -c checksum-sha256.txt)
+            "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose dist/Controle_Cancelamentos_Elite_v4.3.99999.apk
+            echo "Fluxo de criação e assinatura protegido validado em CI."
+          fi
 
       - name: Verificar artefato APK
         shell: bash
@@ -86,3 +132,48 @@ jobs:
             app/build/test-results/**
           if-no-files-found: ignore
           retention-days: 7
+
+
+  emulator-smoke:
+    name: Emulador | Instalação e recuperação do backup
+    needs: verify-and-build
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Obter código-fonte
+        uses: actions/checkout@v4
+
+      - name: Configurar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Configurar Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Configurar Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Preparar aceleração do emulador
+        run: |
+          if [ -e /dev/kvm ]; then sudo chmod 666 /dev/kvm; fi
+
+      - name: Testar instalação, inicialização e criptografia em emulador
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_4
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          disable-animations: true
+          script: |
+            gradle --no-daemon assembleDebug assembleDebugAndroidTest
+            adb install -r app/build/outputs/apk/debug/app-debug.apk
+            adb shell am start -W -n br.com.controlecancelamentos/.MainActivity
+            adb shell pidof br.com.controlecancelamentos
+            gradle --no-daemon connectedDebugAndroidTest

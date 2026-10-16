@@ -42,6 +42,23 @@ fun AdminScreen(vm: AppViewModel, onLogout: () -> Unit) {
     val scope = rememberCoroutineScope()
     var backupPassword by remember { mutableStateOf("") }
     var pendingBackup by remember { mutableStateOf<ByteArray?>(null) }
+    // Backup completo usa SAF e streaming para não manter imagens em memória.
+    var completePassword by remember { mutableStateOf("") }
+    val saveCompleteBackup = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri ->
+        val password = completePassword
+        completePassword = ""
+        if (uri != null && password.isNotBlank()) vm.exportCompleteBackup(uri, password)
+    }
+    val pickCompleteBackup = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        val password = completePassword
+        completePassword = ""
+        if (uri != null && password.isNotBlank()) vm.prepareCompleteRestore(uri, password)
+    }
+
     val saveBackup = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         val bytes = pendingBackup
         pendingBackup = null
@@ -82,8 +99,8 @@ fun AdminScreen(vm: AppViewModel, onLogout: () -> Unit) {
             title = { Text("Confirmar restauração de backup") },
             text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Arquivo autenticado com sucesso.")
-                Text("${preview.stores} loja(s) e ${preview.records} cancelamento(s) disponíveis para importação.")
-                Text("Dados existentes serão preservados. Lojas e registros ausentes serão adicionados; a identidade visual local será atualizada. Fotos e usuários não são restaurados.")
+                Text("${preview.stores} loja(s), ${preview.records} cancelamento(s) e ${preview.photos} foto(s) disponíveis.")
+                Text(if (preview.isComplete) "Backup completo autenticado. Serão restaurados registros novos e suas fotos. Contas de usuários e senhas não são transferidas." else "Backup antigo: serão importados registros e lojas, mas não fotos ou usuários. Os dados existentes serão preservados.")
             } },
             confirmButton = { TextButton(onClick = { vm.confirmRestore() }, enabled = !busy) { Text("Confirmar importação") } },
             dismissButton = { TextButton(onClick = { vm.dismissRestore() }, enabled = !busy) { Text("Cancelar") } }
@@ -127,8 +144,91 @@ fun AdminScreen(vm: AppViewModel, onLogout: () -> Unit) {
                     vm.setAppearance(when (selected) { "Claro" -> 1; "Escuro" -> 2; else -> 0 })
                 }
             }
+            UpdatePanel()
+            PremiumPanel {
+                Icon(Icons.Default.Backup, null, tint = MaterialTheme.colorScheme.primary)
+                SectionTitle("Backup completo e restauração")
+                Text("RECOMENDADO • Backup com registros, lojas e fotos dos cupons. Protegido por senha e criptografia AES-256-GCM.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary)
+                OutlinedTextField(
+                    backupPassword, { backupPassword = it }, modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Senha do backup (mínimo 10 caracteres)") },
+                    singleLine = true, visualTransformation = PasswordVisualTransformation()
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            completePassword = backupPassword
+                            backupPassword = ""
+                            saveCompleteBackup.launch("cancelamentos-elite-completo.ccf3")
+                        },
+                        enabled = !busy && backupPassword.length >= 10,
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 6.dp)
+                    ) {
+                        Icon(Icons.Default.Backup, null, Modifier.size(17.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Backup + fotos")
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            completePassword = backupPassword
+                            backupPassword = ""
+                            pickCompleteBackup.launch(arrayOf("*/*"))
+                        },
+                        enabled = !busy && backupPassword.length >= 10,
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 6.dp)
+                    ) {
+                        Icon(Icons.Default.Restore, null, Modifier.size(17.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Restaurar completo")
+                    }
+                }
+                Text("Antes de reinstalar ou trocar de celular: exporte o .ccf3, confira que foi salvo, guarde a senha e teste a restauração. O formato completo inclui fotos, mas não inclui contas nem senhas de acesso.",
+                    style = MaterialTheme.typography.bodySmall, color = Grey)
+                HorizontalDivider()
+                Text("Backup antigo (.ccel) — sem fotos", style = MaterialTheme.typography.titleSmall)
+
+                Text("Compatibilidade com backups anteriores: lojas, cancelamentos e identidade. Este formato não inclui fotos.",
+                    style = MaterialTheme.typography.bodySmall, color = Grey)
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = {
+                        vm.exportEncryptedBackup(backupPassword) { bytes ->
+                            pendingBackup = bytes
+                            backupPassword = ""
+                            saveBackup.launch("cancelamentos-elite-backup.ccel")
+                        }
+                    }, enabled = !busy && backupPassword.length >= 10, modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 6.dp)) {
+                        Icon(Icons.Default.FileUpload, null, Modifier.size(17.dp)); Spacer(Modifier.width(5.dp)); Text("Exportar")
+                    }
+                    OutlinedButton(onClick = { selectBackup.launch(arrayOf("*/*")) },
+                        enabled = !busy && backupPassword.isNotBlank(), modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 6.dp)) {
+                        Icon(Icons.Default.FileDownload, null, Modifier.size(17.dp)); Spacer(Modifier.width(5.dp)); Text("Restaurar")
+                    }
+                }
+                Text("Para restaurar, digite a senha do arquivo e selecione o .ccel. Confira o resumo e confirme a importação; registros existentes são preservados.",
+                    color = Grey, style = MaterialTheme.typography.bodySmall)
+                Text("A senha não pode ser recuperada. Faça backup antes de reinstalar ou trocar de aparelho e confira se o arquivo foi salvo.",
+                    style = MaterialTheme.typography.labelSmall, color = Grey)
+            }
             PremiumPanel {
                 SectionTitle("Lojas cadastradas")
+                Text("Catálogo de 15 unidades com código fixo. O aplicativo adiciona as faltantes sem apagar lojas e registros existentes.",
+                    color = Grey, style = MaterialTheme.typography.bodySmall)
+                OutlinedButton(
+                    onClick = { vm.restoreStoreCatalog() },
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Store, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(7.dp))
+                    Text("Verificar e completar 15 lojas")
+                }
                 AppTextField(storeName, { storeName = it }, "Nome da nova loja")
                 Button(onClick = { vm.addStore(storeName); storeName = "" }, enabled = storeName.isNotBlank()) {
                     Icon(Icons.Default.AddBusiness, null); Spacer(Modifier.width(7.dp)); Text("Adicionar loja")
@@ -186,36 +286,6 @@ fun AdminScreen(vm: AppViewModel, onLogout: () -> Unit) {
                     }
                     HorizontalDivider(color = CanvasColor)
                 }
-            }
-            PremiumPanel {
-                Icon(Icons.Default.Backup, null, tint = MaterialTheme.colorScheme.primary)
-                SectionTitle("Backup seguro / troca de aparelho")
-                Text("Exporte lojas, cancelamentos ativos e identidade visual em um arquivo AES-256-GCM protegido por senha. Fotos, usuários e senhas de login não entram no backup.",
-                    style = MaterialTheme.typography.bodySmall, color = Grey)
-                OutlinedTextField(backupPassword, { backupPassword = it }, modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Senha do backup (mín. 10 caracteres)") }, singleLine = true,
-                    visualTransformation = PasswordVisualTransformation())
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = {
-                        vm.exportEncryptedBackup(backupPassword) { bytes ->
-                            pendingBackup = bytes
-                            backupPassword = ""
-                            saveBackup.launch("cancelamentos-elite-backup.ccel")
-                        }
-                    }, enabled = !busy && backupPassword.length >= 10, modifier = Modifier.weight(1f),
-                        contentPadding = PaddingValues(horizontal = 6.dp)) {
-                        Icon(Icons.Default.FileUpload, null, Modifier.size(17.dp)); Spacer(Modifier.width(5.dp)); Text("Exportar")
-                    }
-                    OutlinedButton(onClick = { selectBackup.launch(arrayOf("*/*")) },
-                        enabled = !busy && backupPassword.isNotBlank(), modifier = Modifier.weight(1f),
-                        contentPadding = PaddingValues(horizontal = 6.dp)) {
-                        Icon(Icons.Default.FileDownload, null, Modifier.size(17.dp)); Spacer(Modifier.width(5.dp)); Text("Restaurar")
-                    }
-                }
-                Text("Para restaurar, digite a senha do arquivo e selecione o .ccel. Confira o resumo e confirme a importação; registros existentes são preservados.",
-                    color = Grey, style = MaterialTheme.typography.bodySmall)
-                Text("A senha do backup não pode ser recuperada. Guarde uma cópia segura do arquivo antes de desinstalar.",
-                    style = MaterialTheme.typography.labelSmall, color = Grey)
             }
             PremiumPanel {
                 SectionTitle("Privacidade")

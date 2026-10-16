@@ -9,6 +9,7 @@ import br.com.controlecancelamentos.ControleApp
 import br.com.controlecancelamentos.data.*
 import br.com.controlecancelamentos.security.Passwords
 import br.com.controlecancelamentos.security.EncryptedArchive
+import br.com.controlecancelamentos.security.CompleteBackup
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -40,13 +41,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val session = MutableStateFlow<UserEntity?>(null)
     val message = MutableStateFlow<String?>(null)
     val busy = MutableStateFlow(false)
-    data class RestorePreview(val stores: Int, val records: Int)
+    data class RestorePreview(val stores: Int, val records: Int, val photos: Int = 0, val isComplete: Boolean = false)
     val restorePreview = MutableStateFlow<RestorePreview?>(null)
     private var pendingRestore: PortableBackup.Snapshot? = null
+    private var pendingCompleteRestore: CompleteBackup.Prepared? = null
 
     init {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
+                // Cadastro inicial idempotente: preserva IDs, nomes e cancelamentos anteriores.
+                db.withTransaction {
+                    val missing = StoreCatalog.missing(dao.snapshotStores())
+                    missing.forEach { dao.insertStore(StoreEntity(name = it.displayName)) }
+                }
                 val existing = dao.getUsers()
                 requiresSetup.value = existing.isEmpty()
                 val uid = prefs.getString("userId", null)
@@ -204,6 +211,27 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         } catch (_: Exception) { notify("Falha ao excluir. Tente novamente.") }
     }
 
+    fun restoreStoreCatalog() = viewModelScope.launch {
+        if (session.value?.role != "ADMIN") {
+            notify("Somente o administrador pode gerenciar o catálogo de lojas.")
+            return@launch
+        }
+        busy.value = true
+        try {
+            val number = withContext(Dispatchers.IO) {
+                db.withTransaction {
+                    val missing = StoreCatalog.missing(dao.snapshotStores())
+                    missing.forEach { dao.insertStore(StoreEntity(name = it.displayName)) }
+                    missing.size
+                }
+            }
+            notify(if (number == 0) "As 15 unidades já constam no catálogo ou há registros com os mesmos códigos."
+                   else "$number unidade(s) adicionada(s). As lojas existentes foram preservadas.")
+        } catch (_: Exception) {
+            notify("Não foi possível atualizar o catálogo de lojas.")
+        } finally { busy.value = false }
+    }
+
     fun addStore(name: String) = viewModelScope.launch {
         val actor = session.value ?: return@launch
         if (actor.role != "ADMIN") return@launch
@@ -269,6 +297,50 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         finally { busy.value = false }
     }
 
+    /** Backup novo com fotos, em arquivo cifrado, sem carregar imagens em memória. */
+    fun exportCompleteBackup(uri: Uri, password: String) = viewModelScope.launch {
+        if (session.value?.role != "ADMIN") { notify("Acesso restrito ao administrador."); return@launch }
+        if (password.length < 10) { notify("Informe uma senha de pelo menos 10 caracteres."); return@launch }
+        busy.value = true
+        try {
+            val photoCount = withContext(Dispatchers.IO) {
+                val chars = password.toCharArray()
+                try {
+                    CompleteBackup.export(context, uri, chars, dao.snapshotStores(),
+                        dao.snapshotCancellations(), branding.value)
+                } finally { chars.fill('\u0000') }
+            }
+            notify("Backup completo criado com $photoCount foto(s). Guarde o arquivo e a senha em local seguro.")
+        } catch (e: Exception) {
+            notify("Falha ao exportar backup completo: ${e.message ?: "verifique os anexos e espaço livre"}")
+        } finally { busy.value = false }
+    }
+
+    /** Lê autenticação AES-GCM e mostra contagem ANTES de importar. */
+    fun prepareCompleteRestore(uri: Uri, password: String) = viewModelScope.launch {
+        if (session.value?.role != "ADMIN") { notify("Acesso restrito ao administrador."); return@launch }
+        if (password.length < 10) { notify("Informe a senha do arquivo."); return@launch }
+        busy.value = true
+        dismissRestore()
+        try {
+            val user = session.value?.id ?: return@launch
+            val prepared = withContext(Dispatchers.IO) {
+                val chars = password.toCharArray()
+                try { CompleteBackup.prepare(context, uri, chars, user) }
+                finally { chars.fill('\u0000') }
+            }
+            pendingCompleteRestore = prepared
+            pendingRestore = prepared.snapshot
+            restorePreview.value = RestorePreview(
+                prepared.snapshot.stores.size, prepared.snapshot.records.size,
+                prepared.images.size, isComplete = true
+            )
+        } catch (e: Exception) {
+            dismissRestore()
+            notify("Backup não pôde ser autenticado ou lido: ${e.message ?: "arquivo inválido"}")
+        } finally { busy.value = false }
+    }
+
     /** Etapa 1: validar e pré-visualizar, sem gravar nenhuma informação. */
     fun prepareRestore(archive: ByteArray, password: String) = viewModelScope.launch {
         if (session.value?.role != "ADMIN") { notify("Acesso restrito ao administrador."); return@launch }
@@ -292,35 +364,91 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun dismissRestore() {
+        pendingCompleteRestore?.clean()
+        pendingCompleteRestore = null
         pendingRestore = null
         restorePreview.value = null
     }
 
-    /** Etapa 2: somente após confirmação explícita. */
+    /** Importação só após confirmação; fotos e banco seguem uma transação recuperável. */
     fun confirmRestore() = viewModelScope.launch {
         val actor = session.value ?: return@launch
         if (actor.role != "ADMIN") { dismissRestore(); return@launch }
         val snapshot = pendingRestore ?: return@launch
+        val complete = pendingCompleteRestore
+        val newPhotoFiles = mutableListOf<File>()
+        var databaseCommitted = false
         busy.value = true
         try {
-            val count = withContext(Dispatchers.IO) {
+            val (count, copiedPhotos) = withContext(Dispatchers.IO) {
                 db.withTransaction {
-                    snapshot.stores.forEach { dao.importStore(it) }
-                    var imported = 0
-                    snapshot.records.forEach { row ->
-                        if (dao.countDuplicate(row.dateIso, row.coupon, row.storeId, row.pdv, row.id) == 0 &&
-                            dao.importCancellation(row) != -1L) imported++
+                    val localStores = dao.snapshotStores().toMutableList()
+                    val storeMap = mutableMapOf<String, String>()
+                    snapshot.stores.forEach { incoming ->
+                        val matching = localStores.filter { StoreCatalog.sameStore(it, incoming) }.singleOrNull()
+                        if (matching != null) storeMap[incoming.id] = matching.id
+                        else {
+                            dao.importStore(incoming)
+                            localStores.add(incoming)
+                            storeMap[incoming.id] = incoming.id
+                        }
                     }
-                    dao.log(AuditEntity(action = "IMPORTAR", subjectId = "BACKUP", actorId = actor.id,
-                        description = "Importados $imported de ${snapshot.records.size} registros ativos"))
-                    imported
+                    var imported = 0
+                    var photoCount = 0
+                    snapshot.records.forEach { original ->
+                        val localId = original.storeId?.let { storeMap[it] ?: it }
+                        val localName = localStores.firstOrNull { it.id == localId }?.name
+                        var row = original.copy(storeId = localId,
+                            storeName = localName ?: original.storeName)
+                        val originalPhoto = complete?.images?.get(row.id)
+                        val existing = dao.cancellationById(row.id)
+                        if (existing != null) {
+                            val previousFile = existing.photoPath?.let { File(it) }
+                            if (originalPhoto != null && (previousFile == null || !previousFile.isFile)) {
+                                val targetDir = File(context.filesDir, "cupons").apply { mkdirs() }
+                                val target = File(targetDir, "${row.id}-restored-${System.nanoTime()}.img")
+                                originalPhoto.copyTo(target, overwrite = false)
+                                newPhotoFiles.add(target)
+                                dao.updateCancellation(existing.copy(
+                                    photoPath = target.absolutePath,
+                                    updatedAt = System.currentTimeMillis(), updatedBy = actor.id
+                                ))
+                                photoCount++
+                            }
+                        } else if (dao.countDuplicate(row.dateIso, row.coupon, row.storeId, row.pdv, row.id) == 0) {
+                            val imageSource = complete?.images?.get(row.id)
+                            var photoCopy: File? = null
+                            if (imageSource != null) {
+                                val targetDir = File(context.filesDir, "cupons").apply { mkdirs() }
+                                photoCopy = File(targetDir, "${row.id}-restored-${System.nanoTime()}.img")
+                                imageSource.copyTo(photoCopy, overwrite = false)
+                                newPhotoFiles.add(photoCopy)
+                                row = row.copy(photoPath = photoCopy.absolutePath)
+                            }
+                            if (dao.importCancellation(row) != -1L) {
+                                imported++
+                                if (photoCopy != null) photoCount++
+                            } else {
+                                photoCopy?.delete()
+                                if (photoCopy != null) newPhotoFiles.remove(photoCopy)
+                            }
+                        }
+                    }
+                    dao.log(AuditEntity(action = "IMPORTAR", subjectId = "BACKUP",
+                        actorId = actor.id,
+                        description = "Importados $imported de ${snapshot.records.size} registros; $photoCount fotos"))
+                    imported to photoCount
                 }
             }
-            BrandingStore.save(context, snapshot.brand)
-            branding.value = snapshot.brand
-            notify("Restauração concluída: $count novo(s) registro(s). Usuários e imagens não são incluídos.")
-        } catch (_: Exception) {
-            notify("Não foi possível concluir a restauração. Confira os registros e tente novamente se necessário.")
+            databaseCommitted = true
+            val brandingSaved = runCatching { BrandingStore.save(context, snapshot.brand) }.isSuccess
+            if (brandingSaved) branding.value = snapshot.brand
+            notify("Restauração concluída: $count registro(s) e $copiedPhotos foto(s). " +
+                (if (brandingSaved) "Dados anteriores preservados."
+                 else "Dados preservados; não foi possível atualizar a identidade visual."))
+        } catch (e: Exception) {
+            if (!databaseCommitted) withContext(Dispatchers.IO) { newPhotoFiles.forEach { it.delete() } }
+            notify("Restauração não concluída: ${e.message ?: "confira espaço e dados"}. O banco não foi importado.")
         } finally { dismissRestore(); busy.value = false }
     }
 
