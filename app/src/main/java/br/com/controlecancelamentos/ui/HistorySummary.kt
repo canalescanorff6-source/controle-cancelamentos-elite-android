@@ -63,7 +63,7 @@ private fun filtered(items: List<CancellationEntity>, f: Filters): List<Cancella
 
 @Composable
 private fun FilterPanel(f: Filters, change: (Filters) -> Unit, stores: List<StoreEntity>, includeSearch: Boolean) {
-    var expanded by remember { mutableStateOf(false) }
+    var expanded by remember { mutableStateOf(includeSearch) }
     PremiumPanel {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             Icon(Icons.Default.FilterList, null, tint = MaterialTheme.colorScheme.primary)
@@ -75,9 +75,38 @@ private fun FilterPanel(f: Filters, change: (Filters) -> Unit, stores: List<Stor
         if (includeSearch) AppTextField(f.search, { change(f.copy(search = it)) }, "Buscar cupom ou responsável")
         invalidFilter(f)?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         if (expanded) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                AppTextField(f.from, { change(f.copy(from = it)) }, "De • dd/MM/aaaa", Modifier.weight(1f))
-                AppTextField(f.to, { change(f.copy(to = it)) }, "Até • dd/MM/aaaa", Modifier.weight(1f))
+            Text("Período", color = Grey, style = MaterialTheme.typography.labelMedium)
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                val options = listOf(
+                    "Hoje" to DateFilterUtils.Shortcut.TODAY,
+                    "7 dias" to DateFilterUtils.Shortcut.LAST_7_DAYS,
+                    "30 dias" to DateFilterUtils.Shortcut.LAST_30_DAYS,
+                    "Este mês" to DateFilterUtils.Shortcut.THIS_MONTH,
+                    "Mês anterior" to DateFilterUtils.Shortcut.PREVIOUS_MONTH
+                )
+                options.forEach { (label, shortcut) ->
+                    val period = remember(shortcut) { DateFilterUtils.period(shortcut) }
+                    FilterChip(
+                        selected = f.from == period.from && f.to == period.to,
+                        onClick = { change(f.copy(from = period.from, to = period.to)) },
+                        label = { Text(label) }
+                    )
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                DateFilterField("Data inicial", f.from, { change(f.copy(from = it)) }, Modifier.weight(1f))
+                DateFilterField("Data final", f.to, { change(f.copy(to = it)) }, Modifier.weight(1f))
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Digite somente números ou toque no calendário.", modifier = Modifier.weight(1f),
+                    color = Grey, style = MaterialTheme.typography.labelSmall)
+                TextButton(
+                    onClick = { change(f.copy(from = "", to = "")) },
+                    enabled = f.from.isNotBlank() || f.to.isNotBlank()
+                ) { Text("Limpar datas") }
             }
             val storeNames = listOf("Todas as lojas") + stores.map { it.name }
             SimpleSelector("Loja", stores.firstOrNull { it.id == f.storeId }?.name ?: "Todas as lojas", storeNames) { name ->
