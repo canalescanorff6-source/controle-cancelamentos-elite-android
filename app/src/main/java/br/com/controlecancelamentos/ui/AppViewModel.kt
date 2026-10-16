@@ -399,7 +399,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         val localName = localStores.firstOrNull { it.id == localId }?.name
                         var row = original.copy(storeId = localId,
                             storeName = localName ?: original.storeName)
-                        if (dao.countDuplicate(row.dateIso, row.coupon, row.storeId, row.pdv, row.id) == 0) {
+                        val originalPhoto = complete?.images?.get(row.id)
+                        val existing = dao.cancellationById(row.id)
+                        if (existing != null) {
+                            val previousFile = existing.photoPath?.let { File(it) }
+                            if (originalPhoto != null && (previousFile == null || !previousFile.isFile)) {
+                                val targetDir = File(context.filesDir, "cupons").apply { mkdirs() }
+                                val target = File(targetDir, "${row.id}-restored-${System.nanoTime()}.img")
+                                originalPhoto.copyTo(target, overwrite = false)
+                                newPhotoFiles.add(target)
+                                dao.updateCancellation(existing.copy(
+                                    photoPath = target.absolutePath,
+                                    updatedAt = System.currentTimeMillis(), updatedBy = actor.id
+                                ))
+                                photoCount++
+                            }
+                        } else if (dao.countDuplicate(row.dateIso, row.coupon, row.storeId, row.pdv, row.id) == 0) {
                             val imageSource = complete?.images?.get(row.id)
                             var photoCopy: File? = null
                             if (imageSource != null) {
