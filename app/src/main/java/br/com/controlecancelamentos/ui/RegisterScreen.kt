@@ -82,6 +82,7 @@ fun RegisterScreen(vm: AppViewModel, editing: CancellationEntity?, busy: Boolean
                         candidate, stores.filter { it.active || it.id == form.storeId }.map { it.name }
                     )
                     val matchedStore = stores.singleOrNull { it.name == nameFromReceipt }
+                        ?: StoreCatalog.matchCouponCode(candidate.headerLines.joinToString("\n"), stores)
                     val extracted = buildList {
                         if (candidate.coupon != null) add("cupom")
                         if (candidate.amountCents != null) add("valor")
