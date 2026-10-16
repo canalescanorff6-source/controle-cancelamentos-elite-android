@@ -54,16 +54,16 @@ jobs:
 
       - name: Assinar, verificar, publicar APK
         env:
-          GH_TOKEN: \${{ github.token }}
-          ELITE_KEYSTORE_BASE64: \${{ secrets.ELITE_KEYSTORE_BASE64 }}
-          ELITE_KEYSTORE_PASSWORD: \${{ secrets.ELITE_KEYSTORE_PASSWORD }}
-          ELITE_KEY_ALIAS: \${{ secrets.ELITE_KEY_ALIAS }}
-          ELITE_KEY_PASSWORD: \${{ secrets.ELITE_KEY_PASSWORD }}
+          GH_TOKEN: ${{ github.token }}
+          ELITE_KEYSTORE_BASE64: ${{ secrets.ELITE_KEYSTORE_BASE64 }}
+          ELITE_KEYSTORE_PASSWORD: ${{ secrets.ELITE_KEYSTORE_PASSWORD }}
+          ELITE_KEY_ALIAS: ${{ secrets.ELITE_KEY_ALIAS }}
+          ELITE_KEY_PASSWORD: ${{ secrets.ELITE_KEY_PASSWORD }}
         shell: bash
         run: |
           set -euo pipefail
           for env_var in ELITE_KEYSTORE_BASE64 ELITE_KEYSTORE_PASSWORD ELITE_KEY_ALIAS ELITE_KEY_PASSWORD; do
-            if [ -z "\${!env_var:-}" ]; then
+            if [ -z "${!env_var:-}" ]; then
               echo "::error::Configure o segredo $env_var antes de publicar um Release"
               exit 1
             fi
