@@ -28,6 +28,29 @@ jobs:
           python3 tools/check_source.py
           git diff --check
 
+      - name: Conferir integridade do assinador oficial
+        run: |
+          node --check tools/elite-signing.cjs
+          node tools/elite-signing.cjs check
+
+      - name: Verificar presença de segredos sem expor valores
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          MASTER: ${{ secrets.ANDROID_RELEASE_SECRET }}
+          KEY64: ${{ secrets.ELITE_KEYSTORE_BASE64 }}
+          STOREPASS: ${{ secrets.ELITE_KEYSTORE_PASSWORD }}
+          KEYALIAS: ${{ secrets.ELITE_KEY_ALIAS }}
+          KEYPASS: ${{ secrets.ELITE_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          if [ -n "$MASTER" ]; then
+            echo 'Segredo mestre ANDROID_RELEASE_SECRET: CONFIGURADO' >> "$GITHUB_STEP_SUMMARY"
+          elif [ -n "$KEY64" ] && [ -n "$STOREPASS" ] && [ -n "$KEYALIAS" ] && [ -n "$KEYPASS" ]; then
+            echo 'Assinatura legada ELITE_KEYSTORE_*: CONFIGURADA' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Assinatura permanente: NÃO CONFIGURADA neste repositório (configure antes de publicar)' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Configurar Java 17
         uses: actions/setup-java@v4
         with:
