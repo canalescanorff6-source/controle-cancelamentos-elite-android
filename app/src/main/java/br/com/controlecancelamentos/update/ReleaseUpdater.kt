@@ -87,7 +87,7 @@ object ReleaseUpdater {
 
     suspend fun downloadAndVerify(context: Context, update: AvailableUpdate): File = withContext(Dispatchers.IO) {
         val dir = File(context.cacheDir, "atualizacoes").apply { mkdirs() }
-        val temp = File(dir, "elite-update.part")
+        val temp = File(dir, "elite-update-pending.apk")
         val apk = File(dir, "elite-update.apk")
         temp.delete()
         try {
