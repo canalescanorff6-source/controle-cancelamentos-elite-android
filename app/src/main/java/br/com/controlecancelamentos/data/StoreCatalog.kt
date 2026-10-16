@@ -49,6 +49,14 @@ object StoreCatalog {
         }
     }
 
+    fun sameStore(a: StoreEntity, b: StoreEntity): Boolean {
+        if (a.id == b.id) return true
+        val aCode = codeFromName(a.name)
+        val bCode = codeFromName(b.name)
+        return (aCode != null && aCode == bCode) ||
+            plain(a.name) == plain(b.name)
+    }
+
     /** Faz o match apenas se o cupom e a lista de lojas apontarem uma única loja. */
     fun matchCouponCode(receiptText: String, existing: List<StoreEntity>): StoreEntity? {
         val m = Regex("""(?i)(?<![\p{L}\d])(?:LJ|LOJA|FILIAL)\s*[:#-]?\s*0*(\d{1,3})\b""")
