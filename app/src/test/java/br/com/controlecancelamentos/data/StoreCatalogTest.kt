@@ -55,4 +55,12 @@ class StoreCatalogTest {
         assertEquals("2", StoreCatalog.codeFromName("02 Cohama"))
         assertNull(StoreCatalog.codeFromName("Cohama"))
     }
+
+    @Test fun backupReconheceLojasEquivalentes() {
+        val original = StoreEntity(name = "Loja 0010 - Santa Inês")
+        val atual = StoreEntity(name = "10 Santa Inês")
+        assertTrue(StoreCatalog.sameStore(original, atual))
+        assertTrue(StoreCatalog.sameStore(StoreEntity(name = "São Cristóvão"), StoreEntity(name = "sao cristovao")))
+        assertFalse(StoreCatalog.sameStore(StoreEntity(name = "02 Cohama"), StoreEntity(name = "03 Maiobão")))
+    }
 }
