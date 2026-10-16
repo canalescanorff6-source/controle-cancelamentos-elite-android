@@ -129,8 +129,11 @@ jobs:
             exit 1
           fi
 
-      - name: Testar e gerar APK release
-        run: gradle --no-daemon --stacktrace testDebugUnitTest assembleRelease
+      - name: Executar testes Android sem concorrencia no schema Room
+        run: gradle --no-daemon --stacktrace testDebugUnitTest
+
+      - name: Gerar APK release com KSP separado
+        run: gradle --no-daemon --stacktrace assembleRelease
 
       - name: Assinar com identidade permanente (segredo único)
         if: steps.signing.outputs.mode == 'master'
