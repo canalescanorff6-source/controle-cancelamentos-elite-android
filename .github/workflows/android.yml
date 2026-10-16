@@ -44,11 +44,11 @@ jobs:
         shell: bash
         run: |
           if [ -n "$MASTER" ]; then
-            echo 'Segredo mestre ANDROID_RELEASE_SECRET: CONFIGURADO' >> "$GITHUB_STEP_SUMMARY"
+            echo 'Segredo mestre ANDROID_RELEASE_SECRET: CONFIGURADO' | tee -a "$GITHUB_STEP_SUMMARY"
           elif [ -n "$KEY64" ] && [ -n "$STOREPASS" ] && [ -n "$KEYALIAS" ] && [ -n "$KEYPASS" ]; then
-            echo 'Assinatura legada ELITE_KEYSTORE_*: CONFIGURADA' >> "$GITHUB_STEP_SUMMARY"
+            echo 'Assinatura legada ELITE_KEYSTORE_*: CONFIGURADA' | tee -a "$GITHUB_STEP_SUMMARY"
           else
-            echo 'Assinatura permanente: NÃO CONFIGURADA neste repositório (configure antes de publicar)' >> "$GITHUB_STEP_SUMMARY"
+            echo 'Assinatura permanente: NÃO CONFIGURADA neste repositório (configure antes de publicar)' | tee -a "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Configurar Java 17
