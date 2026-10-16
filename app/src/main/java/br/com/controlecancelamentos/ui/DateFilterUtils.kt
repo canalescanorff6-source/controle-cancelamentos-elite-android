@@ -32,6 +32,23 @@ object DateFilterUtils {
         }
     }
 
+    fun formatEdit(previous: String, entered: String): String {
+        if (entered.length == previous.length - 1 &&
+            previous.filter(Char::isDigit) == entered.filter(Char::isDigit)
+        ) {
+            val at = previous.indices.firstOrNull { it >= entered.length || previous[it] != entered[it] }
+            if (at != null && previous[at] == '/') {
+                // Backspace sobre separador: remove o número anterior também.
+                val previousDigitIndex = previous.substring(0, at).count(Char::isDigit) - 1
+                val digits = entered.filter(Char::isDigit)
+                if (previousDigitIndex >= 0 && previousDigitIndex < digits.length) {
+                    return formatInput(digits.removeRange(previousDigitIndex, previousDigitIndex + 1))
+                }
+            }
+        }
+        return formatInput(entered)
+    }
+
     fun parse(value: String): LocalDate? = runCatching {
         LocalDate.parse(value, br)
     }.getOrNull()
