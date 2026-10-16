@@ -54,8 +54,8 @@ jobs:
       - name: Testes unitários Android/JVM
         run: gradle --no-daemon --stacktrace testDebugUnitTest
 
-      - name: Compilar APK instalável de depuração
-        run: gradle --no-daemon --stacktrace assembleDebug
+      - name: Compilar APK e testes instrumentados
+        run: gradle --no-daemon --stacktrace assembleDebug assembleDebugAndroidTest
 
       - name: Verificar artefato APK
         shell: bash
