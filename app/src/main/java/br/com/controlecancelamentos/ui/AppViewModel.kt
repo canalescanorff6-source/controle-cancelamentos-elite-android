@@ -9,6 +9,7 @@ import br.com.controlecancelamentos.ControleApp
 import br.com.controlecancelamentos.data.*
 import br.com.controlecancelamentos.security.Passwords
 import br.com.controlecancelamentos.security.EncryptedArchive
+import br.com.controlecancelamentos.security.CompleteBackup
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -40,9 +41,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val session = MutableStateFlow<UserEntity?>(null)
     val message = MutableStateFlow<String?>(null)
     val busy = MutableStateFlow(false)
-    data class RestorePreview(val stores: Int, val records: Int)
+    data class RestorePreview(val stores: Int, val records: Int, val photos: Int = 0, val isComplete: Boolean = false)
     val restorePreview = MutableStateFlow<RestorePreview?>(null)
     private var pendingRestore: PortableBackup.Snapshot? = null
+    private var pendingCompleteRestore: CompleteBackup.Prepared? = null
 
     init {
         viewModelScope.launch {
@@ -295,6 +297,50 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         finally { busy.value = false }
     }
 
+    /** Backup novo com fotos, em arquivo cifrado, sem carregar imagens em memória. */
+    fun exportCompleteBackup(uri: Uri, password: String) = viewModelScope.launch {
+        if (session.value?.role != "ADMIN") { notify("Acesso restrito ao administrador."); return@launch }
+        if (password.length < 10) { notify("Informe uma senha de pelo menos 10 caracteres."); return@launch }
+        busy.value = true
+        try {
+            val photoCount = withContext(Dispatchers.IO) {
+                val chars = password.toCharArray()
+                try {
+                    CompleteBackup.export(context, uri, chars, dao.snapshotStores(),
+                        dao.snapshotCancellations(), branding.value)
+                } finally { chars.fill('\u0000') }
+            }
+            notify("Backup completo criado com $photoCount foto(s). Guarde o arquivo e a senha em local seguro.")
+        } catch (e: Exception) {
+            notify("Falha ao exportar backup completo: ${e.message ?: "verifique os anexos e espaço livre"}")
+        } finally { busy.value = false }
+    }
+
+    /** Lê autenticação AES-GCM e mostra contagem ANTES de importar. */
+    fun prepareCompleteRestore(uri: Uri, password: String) = viewModelScope.launch {
+        if (session.value?.role != "ADMIN") { notify("Acesso restrito ao administrador."); return@launch }
+        if (password.length < 10) { notify("Informe a senha do arquivo."); return@launch }
+        busy.value = true
+        dismissRestore()
+        try {
+            val user = session.value?.id ?: return@launch
+            val prepared = withContext(Dispatchers.IO) {
+                val chars = password.toCharArray()
+                try { CompleteBackup.prepare(context, uri, chars, user) }
+                finally { chars.fill('\u0000') }
+            }
+            pendingCompleteRestore = prepared
+            pendingRestore = prepared.snapshot
+            restorePreview.value = RestorePreview(
+                prepared.snapshot.stores.size, prepared.snapshot.records.size,
+                prepared.images.size, isComplete = true
+            )
+        } catch (e: Exception) {
+            dismissRestore()
+            notify("Backup não pôde ser autenticado ou lido: ${e.message ?: "arquivo inválido"}")
+        } finally { busy.value = false }
+    }
+
     /** Etapa 1: validar e pré-visualizar, sem gravar nenhuma informação. */
     fun prepareRestore(archive: ByteArray, password: String) = viewModelScope.launch {
         if (session.value?.role != "ADMIN") { notify("Acesso restrito ao administrador."); return@launch }
@@ -318,6 +364,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun dismissRestore() {
+        pendingCompleteRestore?.clean()
+        pendingCompleteRestore = null
         pendingRestore = null
         restorePreview.value = null
     }
