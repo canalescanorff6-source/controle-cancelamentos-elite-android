@@ -132,6 +132,19 @@ jobs:
       - name: Executar testes Android sem concorrencia no schema Room
         run: gradle --no-daemon --stacktrace testDebugUnitTest
 
+      - name: Confirmar esquema Room íntegro após testes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          files = list(Path('app/schemas').rglob('*.json'))
+          for file in files:
+              obj = json.loads(file.read_text(encoding='utf-8'))
+              assert 'database' in obj, f'Room schema inválido: {file}'
+          print(f'Validados {len(files)} esquemas Room antes do build release')
+          PY
+
       - name: Gerar APK release com KSP separado
         run: gradle --no-daemon --stacktrace assembleRelease
 
