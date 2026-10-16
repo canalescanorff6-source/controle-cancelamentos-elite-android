@@ -370,45 +370,66 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         restorePreview.value = null
     }
 
-    /** Etapa 2: somente após confirmação explícita. */
+    /** Importação só após confirmação; fotos e banco seguem uma transação recuperável. */
     fun confirmRestore() = viewModelScope.launch {
         val actor = session.value ?: return@launch
         if (actor.role != "ADMIN") { dismissRestore(); return@launch }
         val snapshot = pendingRestore ?: return@launch
+        val complete = pendingCompleteRestore
+        val newPhotoFiles = mutableListOf<File>()
         busy.value = true
         try {
-            val count = withContext(Dispatchers.IO) {
+            val (count, copiedPhotos) = withContext(Dispatchers.IO) {
                 db.withTransaction {
                     val localStores = dao.snapshotStores().toMutableList()
                     val storeMap = mutableMapOf<String, String>()
                     snapshot.stores.forEach { incoming ->
                         val matching = localStores.filter { StoreCatalog.sameStore(it, incoming) }.singleOrNull()
-                        if (matching != null) {
-                            storeMap[incoming.id] = matching.id
-                        } else {
+                        if (matching != null) storeMap[incoming.id] = matching.id
+                        else {
                             dao.importStore(incoming)
                             localStores.add(incoming)
                             storeMap[incoming.id] = incoming.id
                         }
                     }
                     var imported = 0
+                    var photoCount = 0
                     snapshot.records.forEach { original ->
-                        val localStoreId = original.storeId?.let { storeMap[it] ?: it }
-                        val localName = localStores.firstOrNull { it.id == localStoreId }?.name
-                        val row = original.copy(storeId = localStoreId, storeName = localName ?: original.storeName)
-                        if (dao.countDuplicate(row.dateIso, row.coupon, row.storeId, row.pdv, row.id) == 0 &&
-                            dao.importCancellation(row) != -1L) imported++
+                        val localId = original.storeId?.let { storeMap[it] ?: it }
+                        val localName = localStores.firstOrNull { it.id == localId }?.name
+                        var row = original.copy(storeId = localId,
+                            storeName = localName ?: original.storeName)
+                        if (dao.countDuplicate(row.dateIso, row.coupon, row.storeId, row.pdv, row.id) == 0) {
+                            val imageSource = complete?.images?.get(row.id)
+                            var photoCopy: File? = null
+                            if (imageSource != null) {
+                                val targetDir = File(context.filesDir, "cupons").apply { mkdirs() }
+                                photoCopy = File(targetDir, "${row.id}-restored-${System.nanoTime()}.img")
+                                imageSource.copyTo(photoCopy, overwrite = false)
+                                newPhotoFiles.add(photoCopy)
+                                row = row.copy(photoPath = photoCopy.absolutePath)
+                            }
+                            if (dao.importCancellation(row) != -1L) {
+                                imported++
+                                if (photoCopy != null) photoCount++
+                            } else {
+                                photoCopy?.delete()
+                                if (photoCopy != null) newPhotoFiles.remove(photoCopy)
+                            }
+                        }
                     }
-                    dao.log(AuditEntity(action = "IMPORTAR", subjectId = "BACKUP", actorId = actor.id,
-                        description = "Importados $imported de ${snapshot.records.size} registros ativos"))
-                    imported
+                    dao.log(AuditEntity(action = "IMPORTAR", subjectId = "BACKUP",
+                        actorId = actor.id,
+                        description = "Importados $imported de ${snapshot.records.size} registros; $photoCount fotos"))
+                    imported to photoCount
                 }
             }
             BrandingStore.save(context, snapshot.brand)
             branding.value = snapshot.brand
-            notify("Restauração concluída: $count novo(s) registro(s). Usuários e imagens não são incluídos.")
-        } catch (_: Exception) {
-            notify("Não foi possível concluir a restauração. Confira os registros e tente novamente se necessário.")
+            notify("Restauração concluída: $count registro(s) e $copiedPhotos foto(s). Registros anteriores preservados.")
+        } catch (e: Exception) {
+            withContext(Dispatchers.IO) { newPhotoFiles.forEach { it.delete() } }
+            notify("Restauração não concluída: ${e.message ?: "confira espaço e dados"}. O banco não foi importado.")
         } finally { dismissRestore(); busy.value = false }
     }
 
