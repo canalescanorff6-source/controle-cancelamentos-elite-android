@@ -331,9 +331,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         try {
             val count = withContext(Dispatchers.IO) {
                 db.withTransaction {
-                    snapshot.stores.forEach { dao.importStore(it) }
+                    val localStores = dao.snapshotStores().toMutableList()
+                    val storeMap = mutableMapOf<String, String>()
+                    snapshot.stores.forEach { incoming ->
+                        val matching = localStores.filter { StoreCatalog.sameStore(it, incoming) }.singleOrNull()
+                        if (matching != null) {
+                            storeMap[incoming.id] = matching.id
+                        } else {
+                            dao.importStore(incoming)
+                            localStores.add(incoming)
+                            storeMap[incoming.id] = incoming.id
+                        }
+                    }
                     var imported = 0
-                    snapshot.records.forEach { row ->
+                    snapshot.records.forEach { original ->
+                        val localStoreId = original.storeId?.let { storeMap[it] ?: it }
+                        val localName = localStores.firstOrNull { it.id == localStoreId }?.name
+                        val row = original.copy(storeId = localStoreId, storeName = localName ?: original.storeName)
                         if (dao.countDuplicate(row.dateIso, row.coupon, row.storeId, row.pdv, row.id) == 0 &&
                             dao.importCancellation(row) != -1L) imported++
                     }
