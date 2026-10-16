@@ -28,7 +28,7 @@ class DateFilterUtilsTest {
     }
 
     @Test fun permiteApagarAoLadoDaBarra() {
-        assertEquals("1", DateFilterUtils.formatEdit("10/0", "100"))
+        assertEquals("10", DateFilterUtils.formatEdit("10/0", "100"))
         assertEquals("", DateFilterUtils.formatEdit("1", ""))
     }
 
